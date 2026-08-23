@@ -13,6 +13,7 @@ rather than presenting month-old numbers as current.
 from __future__ import annotations
 
 import contextlib
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -66,6 +67,11 @@ class ProjectionState:
     #: complete record; these are a live view, not an archive.
     max_decisions: int = 5000
     max_equity: int = 20_000
+    #: Uniform-stride decimation state for the equity curve (see the fold for why).
+    equity_seen: int = 0
+    equity_stride: int = 1
+    #: True when the last element is an off-grid "tip" kept so the curve always ends at now.
+    equity_tip: bool = False
 
 
 class ProjectionStore:
@@ -74,12 +80,19 @@ class ProjectionStore:
     Reading is incremental: the API polls ``refresh()``, which consumes only events newer
     than the last one folded. That keeps a dashboard on a multi-hundred-thousand-event
     journal responsive without holding the whole thing in memory.
+
+    **Thread safety is required, not optional.** FastAPI runs synchronous endpoints in a
+    threadpool, so a dashboard polling four endpoints at once calls ``refresh()`` from four
+    threads simultaneously. Without a lock they all read the same ``last_seq``, all fetch the
+    same batch, and all fold it -- which duplicated trades in the UI while the journal itself
+    was perfectly clean. Both ``refresh`` and ``apply`` are guarded.
     """
 
     def __init__(self, run_dir: Path | str, *, max_decisions: int = 5000) -> None:
         self.run_dir = Path(run_dir)
         self.state = ProjectionState(max_decisions=max_decisions)
         self._journal: Journal | None = None
+        self._lock = threading.RLock()
 
     @property
     def available(self) -> bool:
@@ -91,30 +104,43 @@ class ProjectionStore:
         return self._journal
 
     def close(self) -> None:
+        with self._lock:
+            self._close_locked()
+
+    def _close_locked(self) -> None:
         if self._journal is not None:
             with contextlib.suppress(Exception):
                 self._journal.close()
             self._journal = None
 
     def refresh(self, limit: int = 20_000) -> int:
-        j = self._open()
-        if j is None:
-            return 0
-        folded = 0
-        while True:
-            batch = j.read(self.state.last_seq, limit=min(limit, 5000))
-            if not batch:
-                break
-            for event in batch:
-                self.apply(event)
-                folded += 1
-            if folded >= limit:
-                break
-        return folded
+        with self._lock:
+            j = self._open()
+            if j is None:
+                return 0
+            folded = 0
+            while True:
+                batch = j.read(self.state.last_seq, limit=min(limit, 5000))
+                if not batch:
+                    break
+                for event in batch:
+                    self._apply_locked(event)
+                    folded += 1
+                if folded >= limit:
+                    break
+            return folded
 
     # -- folding ------------------------------------------------------------------
 
     def apply(self, event: Event) -> None:
+        with self._lock:
+            self._apply_locked(event)
+
+    def _apply_locked(self, event: Event) -> None:
+        # Already folded. Making the fold idempotent means a duplicate delivery -- a live
+        # journal listener racing a poll-driven refresh -- cannot double-count.
+        if event.seq <= self.state.last_seq:
+            return
         s = self.state
         s.last_seq = max(s.last_seq, event.seq)
         s.last_ts = max(s.last_ts, event.ts)
@@ -135,10 +161,40 @@ class ProjectionStore:
             s.account = Stamped(p, *stamp)
         elif k == EventKind.EQUITY_POINT:
             s.account = Stamped({**(s.account.value or {}), **p}, *stamp)
-            s.equity.append((event.ts, p.get("equity", 0.0), p.get("balance", 0.0)))
-            if len(s.equity) > s.max_equity:
-                # Keep the oldest point so the curve still starts where the run did.
-                del s.equity[1 : len(s.equity) - s.max_equity + 1]
+            # Uniform-stride decimation.
+            #
+            # Two earlier attempts were wrong in instructive ways. Truncating from the front
+            # while keeping the first point drew a straight line from the run's start to the
+            # retained window -- a smooth diagonal implying gradual change that never
+            # happened. Naive repeated halving fixed that but left the sampling wildly
+            # uneven (a 33% gap at the start beside 0.4% gaps at the end), which is its own
+            # kind of lie about where the detail is.
+            #
+            # Keeping every Nth point and doubling N when the buffer fills gives an evenly
+            # sampled curve over the whole run at every scale.
+            # A pure stride would leave the curve's right edge lagging by up to one stride,
+            # which on a live dashboard means the line stops short of the equity the operator
+            # can see in the tile above it. One off-grid "tip" point is therefore always kept
+            # at the end and replaced on each update, leaving the grid itself uniform.
+            s.equity_seen += 1
+            point = (event.ts, p.get("equity", 0.0), p.get("balance", 0.0))
+            if s.equity_tip and s.equity:
+                s.equity.pop()
+                s.equity_tip = False
+            if s.equity_seen % s.equity_stride == 0:
+                s.equity.append(point)
+                if len(s.equity) > s.max_equity:
+                    # `[1::2]`, not `[::2]`. The retained points sit at multiples of the old
+                    # stride, so keeping the ODD positions yields multiples of twice it --
+                    # which is exactly the new grid. Keeping the even positions instead
+                    # leaves the survivors half a step out of phase with everything appended
+                    # afterwards, and that phase error shows up as a single wrong-width gap
+                    # in the middle of the chart.
+                    s.equity = s.equity[1::2]
+                    s.equity_stride *= 2
+            else:
+                s.equity.append(point)
+                s.equity_tip = True
         elif k in (EventKind.VENUE_CONNECTED, EventKind.VENUE_DISCONNECTED,
                    EventKind.VENUE_ERROR):
             s.venue = Stamped({"kind": k, **p}, *stamp)
