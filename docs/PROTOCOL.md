@@ -94,8 +94,12 @@ costs nothing and a flood is a real risk on gold.
 
 ```json
 {"v":1,"t":"bar","ts":…,"sym":"XAUUSD","tf":"M5","open_time":1755950400000,
- "o":2399.0,"h":2401.2,"l":2398.4,"c":2400.6,"v":1234,"spread":22}
+ "o":2399.0,"h":2401.2,"l":2398.4,"c":2400.6,"vol":1234,"spread":22}
 ```
+
+Volume is `vol`, **not** `v`: `v` is the protocol version on every envelope, and reusing it
+for volume made a bar's volume parse as the version number. That collision existed in the
+first draft of this document and was caught by a linter noticing the duplicate key.
 
 `open_time` is the bar's open, converted to UTC by the sender. Only bars that have closed are
 sent — the terminal side detects closure by a change in `iTime(sym, tf, 0)`, never by a wall

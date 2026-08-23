@@ -193,7 +193,7 @@ class BridgeVenue(ExecutionVenue):
                 self._on_bar(Bar(
                     symbol=msg["sym"], tf=Timeframe(msg["tf"]), ts=int(msg["open_time"]),
                     open=float(msg["o"]), high=float(msg["h"]), low=float(msg["l"]),
-                    close=float(msg["c"]), volume=float(msg.get("v", 0.0)),
+                    close=float(msg["c"]), volume=float(msg.get("vol", 0.0)),
                     spread_points=float(msg.get("spread", 0.0)), complete=True,
                 ))
         elif kind == "txn":
