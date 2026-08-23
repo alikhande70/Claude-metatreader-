@@ -346,3 +346,50 @@ Tester, the simulator and live, so a bar-close rule is the only one that backtes
 
 **Consequence.** Trailing is coarser than a tick-level trail would be. That is an accepted
 trade for determinism, and the granularity is a tunable parameter (management timeframe).
+
+---
+
+## ADR-017 — Fills are asynchronous everywhere
+
+**Status:** Accepted
+
+**Context.** In replay, the engine evaluates a strategy at the instant a bar closes. The most
+recent quote it has seen at that moment is the *closing* quote of the bar that generated the
+signal. Filling from it would reintroduce exactly the look-ahead ADR-015 exists to prevent.
+
+**Decision.** `ExecutionVenue.submit()` returns *acceptance*, not necessarily a fill. The
+simulator queues a market order and fills it on the next quote at or after the order's
+timestamp. The engine learns about fills from position state and fill callbacks, never by
+assuming `submit()` returned a filled position.
+
+**Why this is also right for live.** MT5 delivers trade outcomes through
+`OnTradeTransaction`, asynchronously, and a pending order fills minutes or hours after it was
+placed. An engine that assumes a synchronous fill has a hidden special case for market orders
+that breaks on the first requote, partial fill, or slow broker. Making every fill
+asynchronous means there is one path, and it is the one that survives.
+
+**Consequence.** The order router must track in-flight orders and resolve them against
+subsequent position state, which is also what makes idempotent retry (ADR-013) natural: an
+in-flight order whose request timed out is looked up by `client_order_id` rather than
+resubmitted blind.
+
+---
+
+## ADR-018 — Intrabar ambiguity is resolved pessimistically
+
+**Status:** Accepted
+
+**Decision.** When a bar's range contains both a position's stop and its target, the
+simulator fills the **stop**. The intrabar quote path is constructed to visit the adverse
+extreme before the favourable one (low-then-high for a bullish bar).
+
+**Why.** Without tick data the true ordering is unknowable, and it is the single most
+common way a bar-based backtest inflates itself: resolving the ambiguity favourably converts
+losing trades into winners at exactly the volatile moments where the strategy is most
+exposed. MetaTrader's coarser modelling modes have the same failure. The pessimistic choice
+biases results downward, which is the correct direction for a decision about risking money.
+
+**Consequence.** Strategies whose stop and target sit close together relative to bar range
+are penalised more than reality would penalise them. That is visible in the report as a high
+share of `STOP_LOSS` exits and is a signal to widen the target or trade a lower timeframe —
+not a bug to be tuned away.
