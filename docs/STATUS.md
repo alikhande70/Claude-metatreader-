@@ -28,10 +28,11 @@ Nothing in the third column should be treated as working. That is the point of t
 | Engine equivalence | The research feature path and the live rolling path produce **byte-identical trades** on the same data. **Caught four real defects** |
 | Bridge protocol | 32 conformance tests: `BridgeVenue` over a real socket against a fake terminal backed by the real matching engine — handshake, auth, version rejection, specs, orders, retcodes, streaming, timeouts, disconnects |
 | Backtest pipeline | End-to-end runs on 90,000 bars through the CLI; determinism; costs reduce profit monotonically; kill switch halts mid-run; every trade links back to its decision |
-| Projections & API | Concurrency: 48 simultaneous refreshes produce no duplicates. Unknown ≠ zero. Controls refuse when not attached; a drawdown halt cannot be cleared from the dashboard |
+| Position tracking | Open risk follows the **live** stop, so a position at breakeven stops consuming its share of the aggregate cap; an unprotected position falls back to full risk rather than zero; R stays measured against the entry stop |
+| Projections & API | Concurrency: 48 simultaneous refreshes produce no duplicates. Unknown ≠ zero. Controls refuse when not attached; a drawdown halt cannot be cleared from the dashboard. Static route provably contained |
 | Dashboard | Built, served, rendered in light and dark, screenshotted across all five pages, zero console errors |
 
-**307 tests.** `ruff` clean, `mypy` clean across all 67 modules, TypeScript strict.
+**316 tests.** `ruff` clean, `mypy` clean across all 67 modules, TypeScript strict.
 
 ---
 
@@ -79,6 +80,12 @@ unverified is specifically the MQL5 code that speaks it.
 5. **Netting accounts are untested.** The design assumes hedging semantics (one position per
    ticket). A netting account merges positions and would need explicit handling.
 6. **Single-process.** No horizontal scaling, no leader election. One engine, one terminal.
+7. **The journal does not rotate.** It grows at roughly one record per symbol per bar, so a
+   year of live M5 trading on three symbols is on the order of a million events and a few
+   hundred megabytes. That is well within SQLite's comfort zone and easily archived by hand,
+   but segment rotation is not implemented and will be wanted eventually.
+8. **No authentication on the dashboard.** Bind it to localhost, or put a reverse proxy with
+   real auth in front of it. Documented in the runbook rather than half-solved here.
 
 ---
 

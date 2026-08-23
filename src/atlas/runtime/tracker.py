@@ -34,6 +34,9 @@ class TrackedPosition:
     initial_target: float | None
     opened_ts: int
     volume: float
+    #: The stop currently attached at the broker. Distinct from ``initial_stop``, which is
+    #: fixed at entry and defines the R unit; this one moves as the trade is managed.
+    current_stop: float | None = None
     bars_held: int = 0
     best_price: float = 0.0
     worst_price: float = 0.0
@@ -44,6 +47,12 @@ class TrackedPosition:
     @property
     def risk_price_distance(self) -> float:
         return abs(self.entry_price - self.initial_stop)
+
+    def observe_venue(self, pos: Position) -> None:
+        """Refresh the fields the venue is authoritative about."""
+        self.current_stop = pos.stop_loss
+        self.volume = pos.volume
+        self.observe_price(pos.current_price or self.entry_price)
 
     def observe_price(self, price: float) -> None:
         if self.best_price == 0.0:
@@ -73,13 +82,17 @@ class TrackedPosition:
         )
 
     def risk_money(self, spec: SymbolSpec, current_price: float) -> float:
-        """Money still at risk between the *current* stop and the current price.
+        """Money still at risk between the **current** stop and the current price.
 
-        Uses the live stop, not the entry stop: once a position is at breakeven its
-        contribution to open risk is zero, and treating it as full risk would block new
-        trades that the account can comfortably afford.
+        The live stop, not the entry stop. Once a position is at breakeven its contribution
+        to open risk is genuinely zero, and counting it at full size would block new trades
+        the account can comfortably afford.
+
+        Falls back to the entry stop only when the current one is unknown -- an unprotected
+        position is not a zero-risk one, and assuming it were is the dangerous direction to
+        be wrong in.
         """
-        stop = self.initial_stop
+        stop = self.current_stop if self.current_stop is not None else self.initial_stop
         distance = max(0.0, (current_price - stop) * self.side.sign)
         return spec.money_for_points(distance / spec.point, self.volume)
 
@@ -133,7 +146,7 @@ class PositionTracker:
             entry_price=pos.open_price,
             initial_stop=pos.stop_loss if pos.stop_loss is not None else pos.open_price,
             initial_target=pos.take_profit, opened_ts=pos.open_time, volume=pos.volume,
-            stop_reconstructed=True,
+            current_stop=pos.stop_loss, stop_reconstructed=True,
             notes=[reason],
         )
         tp.observe_price(pos.current_price or pos.open_price)

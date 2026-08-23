@@ -360,7 +360,13 @@ class TradingEngine:
         live_by_ticket = {p.ticket: p for p in live}
 
         for pos in live:
-            if self.tracker.get(pos.ticket) is not None:
+            known = self.tracker.get(pos.ticket)
+            if known is not None:
+                # The venue is authoritative about the stop and the volume. Without this the
+                # tracker keeps reporting the ENTRY stop as live risk, so a position moved to
+                # breakeven still consumes its full share of the aggregate risk cap and
+                # blocks trades the account can afford.
+                known.observe_venue(pos)
                 continue
             decision = self._match_decision(pos)
             if decision is not None and decision.proposal is not None:
@@ -372,8 +378,9 @@ class TradingEngine:
                     initial_stop=decision.proposal.stop_loss,
                     initial_target=decision.proposal.take_profit,
                     opened_ts=pos.open_time, volume=pos.volume,
+                    current_stop=pos.stop_loss,
                 )
-                tp.observe_price(pos.current_price or pos.open_price)
+                tp.observe_venue(pos)
                 self.tracker.add(tp)
                 self.journal.append(EventKind.POSITION_OPENED, {
                     "ticket": pos.ticket, "decision_id": decision.decision_id,
