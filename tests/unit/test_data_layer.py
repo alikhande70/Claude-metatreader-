@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, time
+from itertools import pairwise
 
 import pytest
 
@@ -12,7 +13,6 @@ from atlas.core.instrument import SymbolSpec
 from atlas.core.market import Bar, ms_to_dt, utc_ms
 from atlas.data.aggregator import MultiTimeframeAggregator, aggregate, compare_series
 from atlas.data.calendar import (
-    DEFAULT_SESSIONS,
     NewsCalendar,
     NewsEvent,
     ServerClockMapping,
@@ -254,7 +254,7 @@ def test_synthetic_generator_is_deterministic_and_well_formed():
     assert [x.close for x in a] == [x.close for x in b]
     assert generate(SyntheticConfig(bars=500, seed=4))[-1].close != a[-1].close
     assert all(x.low <= x.open <= x.high and x.low <= x.close <= x.high for x in a)
-    assert all(x.ts < y.ts for x, y in zip(a, a[1:], strict=False))
+    assert all(x.ts < y.ts for x, y in pairwise(a))
 
 
 def test_synthetic_excludes_the_closed_weekend():
@@ -290,7 +290,7 @@ async def test_replay_source_stamps_bar_updates_at_close_time():
     assert bar_updates
     for u in bar_updates:
         assert u.ts == u.bar.ts + Timeframe.M5.seconds * 1000
-    assert all(a.ts <= b.ts for a, b in zip(seen, seen[1:], strict=False)), "stream must be ordered"
+    assert all(a.ts <= b.ts for a, b in pairwise(seen)), "stream must be ordered"
 
 
 async def test_replay_warmup_returns_only_closed_bars():
