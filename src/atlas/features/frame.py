@@ -29,6 +29,7 @@ from atlas.features.structure import (
     FairValueGap,
     LiquidityPool,
     StructureSeries,
+    StructureView,
     analyse_structure,
     detect_sweep,
     displacement,
@@ -189,6 +190,25 @@ class FeatureFrame:
         i = i if i >= 0 else self.n + i
         return unmitigated_fvgs(self.fvgs, self.high, self.low, i, max_age=self.cfg.fvg_max_age)
 
+    def index_at(self, ts_ms: int) -> int:
+        """Index of the last bar **closed** at or before ``ts_ms``, or -1 if none.
+
+        ``self.ts`` holds bar OPEN times, so a bar is closed at ``ts + period``. Getting this
+        wrong by one bar is the classic multi-timeframe look-ahead bug; it is computed here
+        once rather than at each call site.
+        """
+        period = self.tf.seconds * 1000
+        idx = int(np.searchsorted(self.ts + period, ts_ms, side="right")) - 1
+        return idx
+
+    def view(self, i: int) -> FrameView:
+        """A zero-copy view of this frame as it stood at bar ``i``."""
+        return FrameView(self, i if i >= 0 else self.n + i)
+
+    def view_at(self, ts_ms: int) -> FrameView | None:
+        i = self.index_at(ts_ms)
+        return None if i < 0 else FrameView(self, i)
+
     def values(self, i: int = -1) -> dict[str, float]:
         """Flat numeric snapshot for the decision record and the dashboard.
 
@@ -224,6 +244,93 @@ class FeatureFrame:
         }
 
 
+class FrameView:
+    """A :class:`FeatureFrame` restricted to bars ``0..i``.
+
+    Every array property returns a **numpy view** (``arr[:i+1]``), which is O(1) and shares
+    memory with the parent. That is what makes it viable to compute features once over a
+    20,000-bar history and then hand each of 20,000 evaluations its own past -- the
+    alternative, recomputing a rolling window per bar, is quadratic and turns a 20-second
+    backtest into a 20-minute one.
+
+    The view exposes the same surface a strategy uses, so strategy code is written once and
+    runs unchanged against a live frame (where "now" is the last bar) and a historical view.
+    """
+
+    __slots__ = ("_f", "_i")
+
+    def __init__(self, frame: FeatureFrame, i: int) -> None:
+        self._f = frame
+        self._i = i
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnostics
+        return f"<FrameView {self._f.symbol}/{self._f.tf} at bar {self._i}>"
+
+    @property
+    def index(self) -> int:
+        return self._i
+
+    @property
+    def n(self) -> int:
+        return self._i + 1
+
+    @property
+    def symbol(self) -> str:
+        return self._f.symbol
+
+    @property
+    def tf(self) -> Timeframe:
+        return self._f.tf
+
+    @property
+    def cfg(self) -> FeatureConfig:
+        return self._f.cfg
+
+    @property
+    def point(self) -> float:
+        return self._f.point
+
+    @property
+    def structure(self) -> StructureView:
+        return StructureView(self._f.structure, self._i)
+
+    def ready(self, i: int = -1) -> bool:
+        return self._f.ready(self._i if i == -1 else i)
+
+    def pools_at(self, i: int = -1) -> list[LiquidityPool]:
+        return self._f.pools_at(self._i if i == -1 else i)
+
+    def sweep_at(self, i: int = -1) -> LiquidityPool | None:
+        return self._f.sweep_at(self._i if i == -1 else i)
+
+    def active_fvgs(self, i: int = -1) -> list[FairValueGap]:
+        return self._f.active_fvgs(self._i if i == -1 else i)
+
+    def values(self, i: int = -1) -> dict[str, float]:
+        return self._f.values(self._i if i == -1 else i)
+
+
+def _view_array(name: str):
+    def getter(self: FrameView) -> np.ndarray:
+        return getattr(self._f, name)[: self._i + 1]
+
+    getter.__name__ = name
+    return property(getter)
+
+
+for _name in (
+    "ts", "open", "high", "low", "close", "atr", "atr_pct", "adx", "plus_di", "minus_di",
+    "rsi", "er", "ema_fast", "ema_slow", "donchian_high", "donchian_low", "body_ratio",
+    "displacement", "realized_vol",
+):
+    setattr(FrameView, _name, _view_array(_name))
+del _name
+
+
+#: Anything a strategy can read features from: a live frame, or a historical view of one.
+FrameLike = FeatureFrame | FrameView
+
+
 @dataclass(slots=True)
 class MultiTimeframeFeatures:
     """Feature frames for one symbol across the strategy's fixed timeframe ladder.
@@ -234,12 +341,12 @@ class MultiTimeframeFeatures:
     """
 
     symbol: str
-    frames: dict[Timeframe, FeatureFrame]
+    frames: dict[Timeframe, FrameLike]
 
-    def get(self, tf: Timeframe) -> FeatureFrame | None:
+    def get(self, tf: Timeframe) -> FrameLike | None:
         return self.frames.get(tf)
 
-    def require(self, tf: Timeframe) -> FeatureFrame:
+    def require(self, tf: Timeframe) -> FrameLike:
         f = self.frames.get(tf)
         if f is None:
             raise KeyError(f"{self.symbol}: no feature frame for {tf}")
@@ -254,6 +361,21 @@ class MultiTimeframeFeatures:
         for f in self.frames.values():
             out.update(f.values())
         return out
+
+    def view_at(self, ts_ms: int) -> MultiTimeframeFeatures:
+        """This symbol's features as they stood at ``ts_ms``.
+
+        Each timeframe is positioned at its last bar **closed** by then, so multi-timeframe
+        alignment is computed in exactly one place. Timeframes with no closed bar yet are
+        omitted, which the strategy reports as ``NOT_READY`` rather than silently skipping.
+        """
+        out: dict[Timeframe, FrameLike] = {}
+        for tf, f in self.frames.items():
+            base = f._f if isinstance(f, FrameView) else f
+            v = base.view_at(ts_ms)
+            if v is not None:
+                out[tf] = v
+        return MultiTimeframeFeatures(self.symbol, out)
 
 
 def _f(x: object) -> float:

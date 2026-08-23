@@ -467,3 +467,49 @@ def displacement(close: np.ndarray, atr_values: np.ndarray, bars: int = 3) -> np
         if a[i] and not np.isnan(a[i]) and a[i] > 0:
             out[i] = (c[i] - c[i - bars]) / a[i]
     return out
+
+
+class StructureView:
+    """A read-only view of a :class:`StructureSeries` as it stood at bar ``i``.
+
+    Zero-copy. Absolute bar indices remain valid because the underlying arrays are not
+    sliced -- only the notion of "now" changes. This is what lets a backtest compute
+    structure once over the whole history and still hand each evaluation a state that
+    contains no future information.
+    """
+
+    __slots__ = ("_i", "_s")
+
+    def __init__(self, series: StructureSeries, i: int) -> None:
+        self._s = series
+        self._i = i if i >= 0 else series.n + i
+
+    @property
+    def n(self) -> int:
+        return self._i + 1
+
+    @property
+    def swing_trend(self) -> list[TrendState]:
+        return self._s.swing_trend
+
+    @property
+    def break_state(self) -> list[TrendState]:
+        return self._s.break_state
+
+    @property
+    def event(self) -> list[StructureEvent]:
+        return self._s.event
+
+    @property
+    def swings(self) -> list[SwingPoint]:
+        return [s for s in self._s.swings if s.confirmed_index <= self._i]
+
+    def at(self, i: int) -> StructureSnapshot:
+        if i < 0:
+            i += self.n
+        if i > self._i:
+            raise IndexError(f"bar {i} is in the future of this view (now = {self._i})")
+        return self._s.at(i)
+
+    def last(self) -> StructureSnapshot:
+        return self._s.at(self._i)
