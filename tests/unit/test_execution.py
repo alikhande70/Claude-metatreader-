@@ -404,11 +404,11 @@ async def test_router_close_is_more_persistent_than_open(gold):
     calls = {"n": 0}
 
     class StubbornVenue(SimulatedVenue):
-        async def close_position(self, ticket, *, volume=None):
+        async def close_position(self, ticket, *, volume=None, reason=ExitReason.MANUAL):
             calls["n"] += 1
             if calls["n"] < 3:
                 raise TransientError("busy")
-            return await super().close_position(ticket, volume=volume)
+            return await super().close_position(ticket, volume=volume, reason=reason)
 
     v = StubbornVenue({gold.name: gold}, config=SimConfig(),
                       costs=CostModel(commission_per_lot_per_side=0.0, swap_enabled=False))
@@ -419,6 +419,17 @@ async def test_router_close_is_more_persistent_than_open(gold):
     router = OrderRouter(v, FrozenClock(0), policy=RetryPolicy(max_attempts=3, base_delay_s=0))
     r = await router.close(1)
     assert r.accepted and calls["n"] == 3
+
+
+async def test_close_reason_is_recorded_on_the_trade(gold):
+    """Every managed exit used to be labelled MANUAL, which made exit analysis useless."""
+    v = mk_venue(gold)
+    await v.connect()
+    v.on_quote(q(gold, 0, 2600.00))
+    await v.submit(req(gold))
+    v.on_quote(q(gold, MIN, 2600.00))
+    await v.close_position(1, reason=ExitReason.TIME_STOP)
+    assert v.trades[0].exit_reason is ExitReason.TIME_STOP
 
 
 async def test_find_by_client_id_distinguishes_open_from_never_existed(gold):

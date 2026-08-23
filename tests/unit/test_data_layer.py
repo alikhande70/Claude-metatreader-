@@ -88,12 +88,26 @@ def test_index_of():
 # --- Aggregation -------------------------------------------------------------------
 
 
-def test_partial_bucket_is_never_emitted():
-    """A 5-hour M5 series yields 4 closed H1 bars, not 5: the last hour is still forming."""
+def test_bucket_closes_when_its_boundary_is_reached_not_one_bar_later():
+    """60 M5 bars span exactly 5 hours, so 5 H1 bars are complete.
+
+    Regression: the aggregator used to wait for a bar belonging to the *next* bucket, which
+    delayed every higher-timeframe bar by one base bar and made the rolling live path
+    disagree with the whole-history research path.
+    """
     bars = [mk(i * 300_000, o=100 + i, h=101 + i, low=99 + i, c=100.5 + i) for i in range(60)]
     h1 = list(aggregate(bars, Timeframe.M5, Timeframe.H1))
-    assert len(h1) == 4
+    assert len(h1) == 5
     assert all(b.complete for b in h1)
+    assert h1[-1].ts == 4 * 3_600_000
+    assert h1[-1].close == bars[-1].close
+
+
+def test_incomplete_final_bucket_is_still_dropped():
+    """59 M5 bars stop 5 minutes short of the 5th hour, so only 4 H1 bars are complete."""
+    bars = [mk(i * 300_000, o=100 + i, h=101 + i, low=99 + i, c=100.5 + i) for i in range(59)]
+    h1 = list(aggregate(bars, Timeframe.M5, Timeframe.H1))
+    assert len(h1) == 4
 
 
 def test_aggregated_ohlc_matches_the_constituent_bars():
@@ -134,6 +148,35 @@ def test_forming_bar_is_marked_incomplete():
     forming = agg.forming()[Timeframe.H1]
     assert forming.complete is False
     assert forming.close == 4.0
+
+
+def test_closed_bars_are_emitted_longest_timeframe_first():
+    """Load-bearing ordering: the trigger timeframe must be handled last, so that when it
+    is evaluated every slower timeframe is already current.
+
+    Regression -- emitting the base timeframe first made the live rolling path evaluate
+    against a stale higher-timeframe frame, and only on the bars where the higher timeframe
+    had just closed."""
+    agg = MultiTimeframeAggregator("X", Timeframe.M5, [Timeframe.M15, Timeframe.H1])
+    seen_orders = []
+    for i in range(60):
+        closed = agg.push(mk(i * 300_000, c=float(i)))
+        if len(closed) > 1:
+            seen_orders.append(list(closed))
+    assert seen_orders, "some bars must close several timeframes at once"
+    for order in seen_orders:
+        secs = [tf.seconds for tf in order]
+        assert secs == sorted(secs, reverse=True), f"not longest-first: {order}"
+        assert order[-1] is Timeframe.M5, "the base timeframe must come last"
+
+
+def test_no_forming_bar_immediately_after_a_bucket_closes():
+    agg = MultiTimeframeAggregator("X", Timeframe.M5, [Timeframe.H1])
+    for i in range(12):  # exactly one hour
+        agg.push(mk(i * 300_000, c=float(i)))
+    assert Timeframe.H1 not in agg.forming()
+    agg.push(mk(12 * 300_000, c=99.0))
+    assert agg.forming()[Timeframe.H1].close == 99.0
 
 
 def test_compare_series_detects_divergence():

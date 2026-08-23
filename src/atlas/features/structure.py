@@ -24,6 +24,12 @@ These are decisions, not defaults to be tuned. Changing one changes the strategy
   BOS/CHoCH. Mixing them into one number would hide which one a rule actually depends on.
 * **A CHoCH does not flip ``swing_trend``.** It sets ``break_state`` and marks the old trend
   as broken; ``swing_trend`` only changes when new confirmed swings establish a new sequence.
+* **Structural state has explicitly bounded memory** (``state_memory_bars``). A break or a
+  swing older than that no longer contributes. This is partly a modelling judgement -- a break
+  of structure from two thousand bars ago does not describe the market now -- and partly a
+  hard architectural requirement (ADR-019): the live engine recomputes features over a rolling
+  window, so any feature whose value depends on unbounded history would differ between the
+  research path and the live path, silently, in a way no test could pin down.
 * **The dealing range is not simply the last two opposite swings.** In chop the most recent
   swing high and swing low can sit a few points apart, which collapses the range and makes
   premium/discount meaningless (or explosive, once you divide by it). The range is instead
@@ -37,6 +43,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 
 from atlas.core.enums import StructureEvent
 
@@ -75,12 +82,22 @@ def find_swings(
     out: list[SwingPoint] = []
     if strength < 1 or n < 2 * strength + 1:
         return out
-    for k in range(strength, n - strength):
-        left_h, right_h = h[k - strength : k], h[k + 1 : k + strength + 1]
-        if h[k] > left_h.max() and h[k] > right_h.max():
+    span = 2 * strength + 1
+    hw = sliding_window_view(h, span)  # window j is centred on bar j + strength
+    lw = sliding_window_view(low_, span)
+    centre_h = hw[:, strength]
+    centre_l = lw[:, strength]
+    is_high = (centre_h > hw[:, :strength].max(axis=1)) & (
+        centre_h > hw[:, strength + 1 :].max(axis=1)
+    )
+    is_low = (centre_l < lw[:, :strength].min(axis=1)) & (
+        centre_l < lw[:, strength + 1 :].min(axis=1)
+    )
+    for j in np.flatnonzero(is_high | is_low):
+        k = int(j) + strength
+        if is_high[j]:
             out.append(SwingPoint(k, int(ts[k]), float(h[k]), "HIGH", k + strength))
-        left_l, right_l = low_[k - strength : k], low_[k + 1 : k + strength + 1]
-        if low_[k] < left_l.min() and low_[k] < right_l.min():
+        if is_low[j]:
             out.append(SwingPoint(k, int(ts[k]), float(low_[k]), "LOW", k + strength))
     out.sort(key=lambda s: (s.confirmed_index, s.index))
     return out
@@ -214,6 +231,7 @@ def analyse_structure(
     strength: int = 3,
     break_margin: np.ndarray | None = None,
     min_range: np.ndarray | None = None,
+    state_memory_bars: int = 300,
 ) -> StructureSeries:
     """Walk the series once, maintaining swing lists and the BOS/CHoCH state machine.
 
@@ -221,6 +239,11 @@ def analyse_structure(
     supply ``max(2 * spread, 0.1 * ATR)``. When omitted, breaks are exact (used only in tests).
 
     ``min_range`` is the per-bar minimum width of the dealing range; supply one ATR.
+
+    ``state_memory_bars`` bounds how long a break or a swing keeps influencing the state.
+    Beyond it, the state decays to ``RANGE``. This is required for the live rolling-window
+    path to agree with the research whole-history path (ADR-019), and it is also the more
+    defensible model: a structural break from two thousand bars ago is not describing now.
     """
     h = np.asarray(high, dtype=np.float64)
     low_ = np.asarray(low, dtype=np.float64)
@@ -231,6 +254,7 @@ def analyse_structure(
         return res
     margin = np.zeros(n) if break_margin is None else np.nan_to_num(np.asarray(break_margin, float))
     min_rng = np.zeros(n) if min_range is None else np.nan_to_num(np.asarray(min_range, float))
+    memory = max(1, int(state_memory_bars))
 
     swings = find_swings(h, low_, ts, strength)
     res.swings = swings
@@ -242,13 +266,18 @@ def analyse_structure(
     lows: list[SwingPoint] = []
     ordered: list[SwingPoint] = []  # all confirmed swings, in confirmation order
     swing_trend: TrendState = "RANGE"
-    break_state: TrendState = "RANGE"
+    # Bounded memory (ADR-019): the break that defines break_state is remembered for
+    # `memory` bars and then forgotten, so the whole state machine is a pure function of a
+    # bounded window of input.
+    last_break_dir: TrendState = "RANGE"
+    last_break_index = -10**9
     # Reference levels that a break is measured against. They are consumed on break so that
     # one swing cannot generate the same BOS on every subsequent bar.
     sh_ref: SwingPoint | None = None
     sl_ref: SwingPoint | None = None
 
     for i in range(n):
+        horizon = i - memory
         for s in by_confirm.get(i, ()):
             ordered.append(s)
             if s.kind == "HIGH":
@@ -257,6 +286,17 @@ def analyse_structure(
             else:
                 lows.append(s)
                 sl_ref = s
+        # Drop anything that has aged out of the memory window.
+        while highs and highs[0].confirmed_index < horizon:
+            highs.pop(0)
+        while lows and lows[0].confirmed_index < horizon:
+            lows.pop(0)
+        while ordered and ordered[0].confirmed_index < horizon:
+            ordered.pop(0)
+        if sh_ref is not None and sh_ref.confirmed_index < horizon:
+            sh_ref = None
+        if sl_ref is not None and sl_ref.confirmed_index < horizon:
+            sl_ref = None
 
         if len(highs) >= 2 and len(lows) >= 2:
             hh = highs[-1].price > highs[-2].price
@@ -269,6 +309,12 @@ def analyse_structure(
                 swing_trend = "BEAR"
             else:
                 swing_trend = "RANGE"
+        else:
+            swing_trend = "RANGE"
+
+        break_state: TrendState = (
+            last_break_dir if (i - last_break_index) <= memory else "RANGE"
+        )
 
         event = StructureEvent.NONE
         m = float(margin[i])
@@ -276,11 +322,13 @@ def analyse_structure(
             # Breaking the reference high: continuation if we were already bullish,
             # otherwise a change of character.
             event = StructureEvent.BOS_UP if break_state == "BULL" else StructureEvent.CHOCH_UP
-            break_state = "BULL"
+            break_state = last_break_dir = "BULL"
+            last_break_index = i
             sh_ref = None
         elif sl_ref is not None and c[i] < sl_ref.price - m:
             event = StructureEvent.BOS_DOWN if break_state == "BEAR" else StructureEvent.CHOCH_DOWN
-            break_state = "BEAR"
+            break_state = last_break_dir = "BEAR"
+            last_break_index = i
             sl_ref = None
 
         lh_p = highs[-1] if highs else None
@@ -347,12 +395,16 @@ def find_fvgs(
     out: list[FairValueGap] = []
     if n < 3:
         return out
-    for k in range(2, n):
-        floor = 0.0 if min_height is None else float(np.nan_to_num(min_height[k]))
-        if low_[k - 2] > h[k] and low_[k - 2] - h[k] >= floor:  # bearish gap
-            out.append(FairValueGap(k, int(ts[k]), float(low_[k - 2]), float(h[k]), False))
-        elif h[k - 2] < low_[k] and low_[k] - h[k - 2] >= floor:  # bullish gap
-            out.append(FairValueGap(k, int(ts[k]), float(low_[k]), float(h[k - 2]), True))
+    k = np.arange(2, n)
+    floor = np.zeros(n) if min_height is None else np.nan_to_num(np.asarray(min_height, float))
+    bear = (low_[k - 2] > h[k]) & ((low_[k - 2] - h[k]) >= floor[k])
+    bull = (h[k - 2] < low_[k]) & ((low_[k] - h[k - 2]) >= floor[k])
+    for j in np.flatnonzero(bear | bull):
+        idx = int(k[j])
+        if bear[j]:
+            out.append(FairValueGap(idx, int(ts[idx]), float(low_[idx - 2]), float(h[idx]), False))
+        else:
+            out.append(FairValueGap(idx, int(ts[idx]), float(low_[idx]), float(h[idx - 2]), True))
     return out
 
 

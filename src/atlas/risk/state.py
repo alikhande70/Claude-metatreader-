@@ -13,7 +13,7 @@ Two properties matter more than anything else here:
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -172,7 +172,14 @@ class RiskState(BaseModel):
         tmp.replace(p)  # atomic: a crash mid-write must not leave a truncated state file
 
     @classmethod
-    def load(cls, path: Path | str) -> RiskState:
+    def load(cls, path: Path | str, now_ms: int = 0) -> RiskState:
+        """Load persisted state.
+
+        ``now_ms`` timestamps the fail-safe halt below. It is a parameter rather than a wall
+        clock read because nothing in the decision path may call ``datetime.now()`` -- that
+        is what makes a backtest reproducible, and the rule holds even in recovery paths
+        (``tests/unit/test_no_mode_branching.py`` enforces it).
+        """
         p = Path(path)
         if not p.exists():
             return cls()
@@ -184,6 +191,6 @@ class RiskState(BaseModel):
             st.trip(
                 HaltReason.MANUAL,
                 f"risk state file at {p} was unreadable; halted pending operator review",
-                int(datetime.now(tz=UTC).timestamp() * 1000),
+                now_ms,
             )
             return st

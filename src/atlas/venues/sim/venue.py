@@ -171,6 +171,12 @@ class SimulatedVenue(ExecutionVenue):
     async def pending_orders(self) -> list[PendingOrder]:
         return [po for po, _ in self._pending.values()]
 
+    async def closed_trades(self, since_ms: int) -> list[Trade]:
+        return [t for t in self.trades if t.exit_time >= since_ms]
+
+    def observe_quote(self, quote: Quote) -> None:
+        self.on_quote(quote)
+
     async def find_by_client_id(self, client_order_id: str) -> Position | None:
         ticket = self._by_client_id.get(client_order_id)
         if ticket is None:
@@ -465,6 +471,7 @@ class SimulatedVenue(ExecutionVenue):
             ),
             gross_profit=gross, commission=commission, swap=swap, exit_reason=reason,
             mae_points=abs(pos.mae_points), mfe_points=pos.mfe_points, strategy=pos.strategy,
+            point=spec.point,
         )
         self.trades.append(trade)
         if volume is None or vol >= pos.volume:
@@ -537,7 +544,10 @@ class SimulatedVenue(ExecutionVenue):
                            status=OrderStatus.FILLED, retcode=_RETCODE_DONE,
                            retcode_text="modified", position_ticket=ticket, ts=self._now)
 
-    async def close_position(self, ticket: int, *, volume: float | None = None) -> OrderResult:
+    async def close_position(
+        self, ticket: int, *, volume: float | None = None,
+        reason: ExitReason = ExitReason.MANUAL,
+    ) -> OrderResult:
         pos = self._positions.get(ticket)
         if pos is None:
             return OrderResult(client_order_id="", accepted=False, status=OrderStatus.REJECTED,
@@ -553,7 +563,7 @@ class SimulatedVenue(ExecutionVenue):
         px = spec.normalize_price(
             q.exit_price_for(str(pos.side)) - pos.side.sign * slip * spec.point
         )
-        trade = self._close(pos, px, q.ts, ExitReason.MANUAL, volume)
+        trade = self._close(pos, px, q.ts, reason, volume)
         return OrderResult(
             client_order_id=pos.client_order_id, accepted=True, status=OrderStatus.FILLED,
             retcode=_RETCODE_DONE, retcode_text="closed", position_ticket=ticket,

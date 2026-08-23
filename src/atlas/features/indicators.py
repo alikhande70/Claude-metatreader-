@@ -17,6 +17,7 @@ Conventions that hold for every function here:
 from __future__ import annotations
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 
 
 def _empty_like(x: np.ndarray) -> np.ndarray:
@@ -163,9 +164,10 @@ def efficiency_ratio(close: np.ndarray, period: int = 20) -> np.ndarray:
         return out
     path = np.abs(np.diff(c, prepend=c[0]))
     cs = np.cumsum(np.insert(path, 0, 0.0))
-    for i in range(period, len(c)):
-        total = cs[i + 1] - cs[i + 1 - period]
-        out[i] = abs(c[i] - c[i - period]) / total if total > 0 else 0.0
+    idx = np.arange(period, len(c))
+    total = cs[idx + 1] - cs[idx + 1 - period]
+    net = np.abs(c[idx] - c[idx - period])
+    out[period:] = np.divide(net, total, out=np.zeros(len(idx)), where=total > 0)
     return out
 
 
@@ -195,15 +197,23 @@ def rolling_percentile(values: np.ndarray, period: int) -> np.ndarray:
 
     Used to make volatility comparable across regimes: "ATR is at its 90th percentile of the
     last 500 bars" is actionable, "ATR is 4.2" is not.
+
+    NaNs in the window are excluded from both the count and the denominator. Comparisons
+    against NaN are False in IEEE arithmetic, which is exactly the behaviour needed here, so
+    the warm-up region does not need special-casing.
     """
     v = np.asarray(values, dtype=np.float64)
     out = _empty_like(v)
-    for i in range(period - 1, len(v)):
-        w = v[i - period + 1 : i + 1]
-        w = w[~np.isnan(w)]
-        if len(w) < 2 or np.isnan(v[i]):
-            continue
-        out[i] = float((w <= v[i]).sum() - 1) / (len(w) - 1)
+    if period < 2 or len(v) < period:
+        return out
+    win = sliding_window_view(v, period)  # shape (len(v) - period + 1, period)
+    centre = v[period - 1 :]
+    valid = (~np.isnan(win)).sum(axis=1)
+    le = (win <= centre[:, None]).sum(axis=1)
+    ok = (valid >= 2) & ~np.isnan(centre)
+    res = np.full(len(centre), np.nan)
+    np.divide((le - 1).astype(float), (valid - 1).astype(float), out=res, where=ok)
+    out[period - 1 :] = np.where(ok, res, np.nan)
     return out
 
 
@@ -217,8 +227,12 @@ def realized_vol(
         return out
     with np.errstate(divide="ignore", invalid="ignore"):
         r = np.diff(np.log(c), prepend=np.log(c[0]))
-    for i in range(period, len(c)):
-        out[i] = float(np.std(r[i - period + 1 : i + 1], ddof=1)) * np.sqrt(bars_per_year)
+    win = sliding_window_view(r, period)
+    sd = win.std(axis=1, ddof=1) * np.sqrt(bars_per_year)
+    # Window j covers r[j : j+period], i.e. bar index j + period - 1. The first emitted bar
+    # is `period` (not period - 1) so that the window never includes the synthetic first
+    # return created by `prepend`.
+    out[period:] = sd[1:]
     return out
 
 
@@ -237,12 +251,14 @@ def slope(values: np.ndarray, period: int) -> np.ndarray:
     """Least-squares slope over a trailing window, expressed per bar."""
     v = np.asarray(values, dtype=np.float64)
     out = _empty_like(v)
+    if period < 2 or len(v) < period:
+        return out
     x = np.arange(period, dtype=np.float64)
     x -= x.mean()
     denom = float((x**2).sum())
-    for i in range(period - 1, len(v)):
-        w = v[i - period + 1 : i + 1]
-        if np.isnan(w).any():
-            continue
-        out[i] = float((x * (w - w.mean())).sum() / denom)
+    win = sliding_window_view(v, period)
+    centred = win - win.mean(axis=1, keepdims=True)
+    vals = (centred * x).sum(axis=1) / denom
+    vals[np.isnan(win).any(axis=1)] = np.nan
+    out[period - 1 :] = vals
     return out

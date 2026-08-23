@@ -27,10 +27,19 @@ from atlas.core.market import Bar, floor_to_timeframe
 class TimeframeAggregator:
     """Folds base-timeframe bars into one higher timeframe.
 
-    Emits a closed HTF bar the moment a base bar belonging to the *next* bucket arrives.
-    This is the only correct trigger: an HTF bar is not closed because time passed, it is
-    closed because the next period started. Waiting on a wall clock would emit bars during
-    market gaps that contain no data.
+    A bucket is closed as soon as a base bar arrives whose **close time reaches the bucket
+    boundary** -- not when a bar belonging to the next bucket turns up.
+
+    That distinction is a correctness issue, not an optimisation. The M15 bar spanning
+    05:00-05:15 is genuinely closed at 05:15, and a live system knows it at 05:15, because
+    the M5 bar 05:10-05:15 has just closed. Waiting for the 05:15 M5 bar to arrive (which
+    happens at 05:20) delays every higher-timeframe bar by one base bar. On an H4 read from
+    M5 data that is five minutes of stale bias on every H4 close -- and, worse, it made the
+    rolling live path disagree with the whole-history research path, because the latter
+    computes closure from timestamps and has no such delay.
+
+    A bucket that never completes (the market closed, or the data ran out) is never emitted,
+    which is what keeps the right-hand edge of a backtest free of partial bars.
     """
 
     def __init__(self, symbol: str, base_tf: Timeframe, target_tf: Timeframe) -> None:
@@ -68,18 +77,29 @@ class TimeframeAggregator:
         if bar.tf is not self.base_tf:
             raise DataError(f"expected {self.base_tf} bars, got {bar.tf}")
         bucket = floor_to_timeframe(bar.ts, self.target_tf)
-        emitted: Bar | None = None
         if self._bucket_ts is None:
             self._start(bucket, bar)
-            return None
+            return self._emit_if_complete(bar)
         if bucket < self._bucket_ts:
             raise DataError(f"base bar {bar.ts} precedes the open bucket {self._bucket_ts}")
         if bucket > self._bucket_ts:
-            emitted = self._close()
+            # The previous bucket never reached its boundary (a gap, or a market close), so
+            # it is discarded rather than emitted as a short bar.
             self._start(bucket, bar)
-            return emitted
+            return self._emit_if_complete(bar)
         self._update(bar)
-        return None
+        return self._emit_if_complete(bar)
+
+    def _emit_if_complete(self, bar: Bar) -> Bar | None:
+        """Close the bucket if this base bar's close reaches the bucket boundary."""
+        if self._bucket_ts is None:
+            return None
+        boundary = self._bucket_ts + self.target_tf.seconds * 1000
+        if bar.ts_close < boundary:
+            return None
+        out = self._close()
+        self._bucket_ts = None
+        return out
 
     def _start(self, bucket: int, bar: Bar) -> None:
         self._bucket_ts = bucket
@@ -97,7 +117,8 @@ class TimeframeAggregator:
         self._count += 1
 
     def _close(self) -> Bar:
-        assert self._bucket_ts is not None
+        if self._bucket_ts is None:  # pragma: no cover - guarded by every caller
+            raise DataError("cannot close a bucket that was never opened")
         return Bar(
             symbol=self.symbol, tf=self.target_tf, ts=self._bucket_ts,
             open=self._o, high=self._h, low=self._l, close=self._c, volume=self._vol,
@@ -126,12 +147,24 @@ class MultiTimeframeAggregator:
         }
 
     def push(self, bar: Bar) -> dict[Timeframe, Bar]:
-        """Returns every timeframe that just closed a bar, including the base timeframe."""
-        closed: dict[Timeframe, Bar] = {self.base_tf: bar}
-        for tf, agg in self.aggregators.items():
-            out = agg.push(bar)
+        """Every timeframe that just closed a bar, **longest first, base timeframe last**.
+
+        The ordering is load-bearing. When an M5 bar and an M15 bar close at the same instant,
+        a consumer that processes the M5 bar first would evaluate its strategy against an M15
+        frame that is one bar stale -- and would do so only on the bars where the higher
+        timeframe happened to close, which is exactly when the higher-timeframe bias is most
+        likely to have changed. Emitting the slowest timeframe first guarantees that by the
+        time the trigger timeframe is handled, every other timeframe is current.
+
+        This was a real defect: it made the rolling live path produce different trades from
+        the whole-history research path, while every individual feature computed identically.
+        """
+        closed: dict[Timeframe, Bar] = {}
+        for tf in sorted(self.aggregators, key=lambda t: t.seconds, reverse=True):
+            out = self.aggregators[tf].push(bar)
             if out is not None:
                 closed[tf] = out
+        closed[self.base_tf] = bar
         return closed
 
     def forming(self) -> dict[Timeframe, Bar]:
@@ -141,9 +174,10 @@ class MultiTimeframeAggregator:
 def aggregate(bars: Iterable[Bar], base_tf: Timeframe, target_tf: Timeframe) -> Iterator[Bar]:
     """One-shot aggregation of a finished historical series.
 
-    The final partial bucket is **dropped**, not flushed: including it would produce a bar
-    whose high/low reflect only part of its period, which is exactly the shape of a
-    look-ahead artefact at the right-hand edge of a backtest.
+    A bucket that reaches its boundary is emitted; one that does not (the data simply ran
+    out mid-period) is dropped. Emitting a partial bucket would produce a bar whose high and
+    low reflect only part of its period -- exactly the shape of a look-ahead artefact at the
+    right-hand edge of a backtest.
     """
     it = iter(bars)
     first = next(it, None)

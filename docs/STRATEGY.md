@@ -160,7 +160,18 @@ perform better?" and if the answer is no, the whole scoring layer should be dele
 1. **Breakeven** at `+be_at_r` R: SL → entry ± (2 × spread) in the profitable direction.
 2. **ATR trail** after `+trail_after_r` R: SL → `extreme ∓ trail_atr × ATR_LTF`, monotonic
    (a trail never loosens).
-3. **Time stop**: if the trade has not reached +1R after `time_stop_bars` LTF bars, close it.
+3. **Time stop**: close if the trade has not reached +1R after
+   `time_stop_travel_mult x (stop_distance / ATR_LTF)^2` LTF bars, capped at
+   `max_time_stop_bars`.
+
+   > Two calibration errors were made here before this landed. A fixed bar count is wrong
+   > because the stop comes from MTF structure while the management clock runs on the LTF, so
+   > "24 bars" is two hours on M5 and six on M15 and neither relates to how long the trade
+   > needs; it closed 70% of trades prematurely. Linear travel time (`distance / ATR`) is also
+   > wrong: price random-walks rather than advancing one ATR per bar in a straight line, so
+   > directional travel grows with the **square root** of elapsed bars and covering `k` ATR
+   > takes on the order of `k²` bars. The linear version still closed 88% of trades on the
+   > time stop.
 4. Protective SL and TP always live **server-side** at the broker. Management only tightens
    them. If the process dies, the trade is still protected.
 
@@ -192,7 +203,8 @@ structural rationale and excluded from every sweep:
 | `atr_pct_max` | 0.95 |
 | `min_stop_atr` / `max_stop_atr` | 0.5 / 4.0 |
 | evidence weights | as tabulated above |
-| `time_stop_bars` | 24 |
+| `time_stop_travel_mult` | 3.0 |
+| `max_time_stop_bars` | 400 |
 | `arm_bars` | 12 |
 
 | Optimisable (swept in walk-forward) | Default | Grid |

@@ -24,7 +24,7 @@ import asyncio
 from dataclasses import dataclass, field
 
 from atlas.core.clock import Clock
-from atlas.core.enums import OrderStatus
+from atlas.core.enums import ExitReason, OrderStatus
 from atlas.core.errors import TransientError, VenueError
 from atlas.core.trading import OrderRequest, OrderResult, Position
 from atlas.execution.venue import ExecutionVenue
@@ -238,7 +238,10 @@ class OrderRouter:
             retcode_text="modify exhausted retries",
         )
 
-    async def close(self, ticket: int, *, volume: float | None = None) -> OrderResult:
+    async def close(
+        self, ticket: int, *, volume: float | None = None,
+        reason: ExitReason = ExitReason.MANUAL,
+    ) -> OrderResult:
         """Close a position.
 
         Retried more persistently than an open, and deliberately so: failing to open is a
@@ -249,7 +252,7 @@ class OrderRouter:
         last: OrderResult | None = None
         for attempt in range(1, self.policy.max_attempts + 2):
             try:
-                last = await self.venue.close_position(ticket, volume=volume)
+                last = await self.venue.close_position(ticket, volume=volume, reason=reason)
             except TransientError:
                 await self._backoff(attempt)
                 continue

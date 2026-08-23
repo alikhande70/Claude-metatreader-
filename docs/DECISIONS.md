@@ -393,3 +393,37 @@ biases results downward, which is the correct direction for a decision about ris
 are penalised more than reality would penalise them. That is visible in the report as a high
 share of `STOP_LOSS` exits and is a signal to widen the target or trade a lower timeframe —
 not a bug to be tuned away.
+
+---
+
+## ADR-019 — Every feature has bounded memory
+
+**Status:** Accepted
+
+**Context.** Backtests compute features once over a full history and index into the result;
+the live engine recomputes over a rolling window. That is only sound if every feature is a
+pure function of a *bounded* window of input. Two constructs violated it:
+
+1. **The BOS/CHoCH state machine** carried its state forward indefinitely. A break two
+   thousand bars ago still defined `break_state`, so a rolling window that did not reach back
+   that far computed a different state — silently, and only sometimes.
+2. **Wilder and EMA recursions** have infinite memory by construction. Their seed differs
+   between a whole-history array and a rolling window, and the difference decays but never
+   reaches zero.
+
+**Decision.**
+
+* Structural state is bounded by `state_memory_bars` (default 300). A break or swing older
+  than that stops contributing and the state decays to `RANGE`.
+* The live feature window is validated against three constraints, and the provider refuses to
+  start if it is too short: the volatility-percentile window, the structural state memory, and
+  **20× the longest smoothing period** so the recursion has forgotten its seed to ~e⁻²⁰.
+
+**Why bounded memory is also the better model.** A structural break from two thousand bars ago
+is not a description of the market now. Bounding it was forced by an architectural
+requirement and improved the feature at the same time.
+
+**Enforcement.** `tests/integration/test_engine_equivalence.py` runs the same data through
+both providers and requires identical trades. Without ADR-019 that test could not pass, and
+the divergence it would have hidden is exactly the kind that makes live results
+inexplicably differ from research.

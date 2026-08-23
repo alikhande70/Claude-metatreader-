@@ -307,7 +307,7 @@ def test_time_stop_closes_a_stalled_trade(m5_bars, gold, calendar, gold_features
     entry = float(m5_bars[i].close)
     pv = PositionView(ticket=3, side=Side.BUY, entry_price=entry, stop_loss=entry - 5,
                       take_profit=entry + 10, open_time=0,
-                      bars_held=strat.p.time_stop_bars + 1, r_multiple_open=0.2, mfe_r=0.3)
+                      bars_held=strat.p.max_time_stop_bars + 1, r_multiple_open=0.2, mfe_r=0.3)
     act = strat.manage(_mgmt_ctx(gold_features, m5_bars, gold, calendar, i, pv))
     assert act is not None and act.close_fraction == 1.0
     assert act.reason is ExitReason.TIME_STOP
@@ -319,7 +319,7 @@ def test_time_stop_does_not_fire_on_a_working_trade(m5_bars, gold, calendar, gol
     entry = float(m5_bars[i].close)
     pv = PositionView(ticket=4, side=Side.BUY, entry_price=entry, stop_loss=entry - 5,
                       take_profit=entry + 10, open_time=0,
-                      bars_held=strat.p.time_stop_bars + 5, r_multiple_open=1.4, mfe_r=1.6)
+                      bars_held=strat.p.max_time_stop_bars + 5, r_multiple_open=1.4, mfe_r=1.6)
     act = strat.manage(_mgmt_ctx(gold_features, m5_bars, gold, calendar, i, pv))
     assert act is None or act.close_fraction == 0.0
 

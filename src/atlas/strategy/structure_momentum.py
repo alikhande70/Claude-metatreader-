@@ -61,7 +61,18 @@ class SM1Params:
     spread_max_atr: float = 0.35
     trail_after_r: float = 1.5
     trail_atr: float = 1.5
-    time_stop_bars: int = 24
+    #: Time stop, as a multiple of the *diffusive* travel time for the stop distance.
+    #:
+    #: Two calibration errors were made here before this landed, and both are worth recording.
+    #: First, a fixed bar count: the stop comes from MTF structure while the management clock
+    #: runs on the LTF, so "24 bars" means two hours on M5 and six on M15 and neither relates
+    #: to how long the trade needs. Second, linear travel time (``distance / ATR``): price
+    #: does not advance one ATR per bar in a straight line, it random-walks, so directional
+    #: travel grows with the SQUARE ROOT of elapsed bars. Covering ``k`` ATR therefore takes
+    #: on the order of ``k**2`` bars, not ``k``. The linear version closed 88% of trades on
+    #: the time stop before they could resolve.
+    time_stop_travel_mult: float = 2.0
+    max_time_stop_bars: int = 400
     news_before_min: int = 15
     news_after_min: int = 15
 
@@ -463,11 +474,21 @@ class StructureMomentum(Strategy):
         sign = pos.side.sign
         atr = float(ltf.atr[-1])
 
-        # Time stop: an idea that has not worked within its window is not working.
-        if pos.bars_held >= p.time_stop_bars and pos.r_multiple_open < 1.0:
+        # Time stop: an idea that has not worked within a window proportional to how long
+        # the trade plausibly needs is not working.
+        risk_distance = abs(pos.entry_price - pos.stop_loss) if pos.stop_loss else 0.0
+        if risk_distance <= 0 and pos.r_multiple_open != 0:
+            risk_distance = atr
+        atr_multiples = (risk_distance / atr) if atr > 0 else 0.0
+        # Diffusive scaling: distance ~ ATR * sqrt(bars), so bars ~ (distance / ATR)**2.
+        bars_to_travel = atr_multiples**2
+        limit = int(min(p.max_time_stop_bars, max(10.0, p.time_stop_travel_mult * bars_to_travel)))
+        if pos.bars_held >= limit and pos.r_multiple_open < 1.0:
             return ManagementAction(
                 close_fraction=1.0, reason=ExitReason.TIME_STOP,
-                detail=f"held {pos.bars_held} {p.ltf} bars without reaching +1R "
+                detail=f"held {pos.bars_held} {p.ltf} bars (limit {limit}: stop is "
+                       f"{atr_multiples:.1f} ATR away, ~{bars_to_travel:.0f} bars of "
+                       f"diffusive travel) without reaching +1R "
                        f"(currently {pos.r_multiple_open:+.2f}R)",
             )
 

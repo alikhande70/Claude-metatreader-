@@ -179,6 +179,26 @@ class Trade(BaseModel):
     mfe_points: float = 0.0  # maximum favourable excursion
     strategy: str = ""
     tags: tuple[str, ...] = ()
+    #: The instrument's point size at the time of the trade. Carried on the record so that
+    #: later analysis can convert MAE/MFE points into R without needing the live symbol spec
+    #: -- broker specs change, and a historical trade must stay interpretable.
+    point: float = 0.0
+
+    @property
+    def stop_points(self) -> float:
+        if self.point <= 0:
+            return 0.0
+        return abs(self.entry_price - self.initial_stop) / self.point
+
+    @property
+    def mae_r(self) -> float:
+        sp = self.stop_points
+        return (self.mae_points / sp) if sp > 0 else 0.0
+
+    @property
+    def mfe_r(self) -> float:
+        sp = self.stop_points
+        return (self.mfe_points / sp) if sp > 0 else 0.0
 
     @property
     def net_profit(self) -> float:

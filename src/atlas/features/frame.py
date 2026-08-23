@@ -72,6 +72,10 @@ class FeatureConfig:
     sweep_penetration_atr: float = 0.10
     displacement_bars: int = 3
     fvg_max_age: int = 200
+    #: How long a structural break or swing keeps influencing state, in bars (ADR-019).
+    #: Must be comfortably smaller than the live feature window, or the live path and the
+    #: research path compute different things.
+    state_memory_bars: int = 300
     #: Minimum width of the dealing range, in ATR. A range narrower than this is not a range.
     #: Chosen structurally (a swing range spanning less than ~2 ATR is a single bar's noise,
     #: not a structure), not optimised. Sensitivity is smooth: sweeping 1.0-3.0 moves the
@@ -125,6 +129,7 @@ class FeatureFrame:
         structure = analyse_structure(
             h, low_, c, ts, strength=cfg.swing_strength, break_margin=margin,
             min_range=cfg.min_range_atr * np.nan_to_num(a),
+            state_memory_bars=cfg.state_memory_bars,
         )
         fvgs = find_fvgs(h, low_, ts, min_height=cfg.fvg_min_atr * np.nan_to_num(a))
         dh, dl = ind.donchian(h, low_, cfg.donchian_period)

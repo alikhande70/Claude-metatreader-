@@ -23,6 +23,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
+from atlas.core.enums import ExitReason
 from atlas.core.instrument import SymbolSpec
 from atlas.core.market import Quote
 from atlas.core.trading import (
@@ -31,6 +32,7 @@ from atlas.core.trading import (
     OrderResult,
     PendingOrder,
     Position,
+    Trade,
 )
 
 
@@ -103,10 +105,36 @@ class ExecutionVenue(ABC):
     ) -> OrderResult: ...
 
     @abstractmethod
-    async def close_position(self, ticket: int, *, volume: float | None = None) -> OrderResult: ...
+    async def close_position(
+        self, ticket: int, *, volume: float | None = None,
+        reason: ExitReason = ExitReason.MANUAL,
+    ) -> OrderResult:
+        """Close a position.
+
+        ``reason`` is a **hint** describing why the caller is closing. No broker records it,
+        so a live venue ignores it; the simulator stores it on the resulting trade so that
+        exit-reason analysis is faithful instead of labelling every managed exit "MANUAL".
+        """
 
     @abstractmethod
     async def cancel_order(self, ticket: int) -> OrderResult: ...
+
+    @abstractmethod
+    async def closed_trades(self, since_ms: int) -> list[Trade]:
+        """Round trips that finished at or after ``since_ms``.
+
+        Needed by reconciliation and by performance analysis. A live implementation reads
+        MT5's deal history and pairs deals into trades; the simulator already has them.
+        """
+
+    def observe_quote(self, quote: Quote) -> None:
+        """Feed a quote to a venue that has no market feed of its own.
+
+        The simulator needs this -- it is driven by the replay stream. Live venues have their
+        own feed and ignore it. Having a default no-op here keeps the engine loop identical
+        in backtest and live (ADR-003) instead of branching on venue type.
+        """
+        return None
 
     @abstractmethod
     async def find_by_client_id(self, client_order_id: str) -> Position | None:

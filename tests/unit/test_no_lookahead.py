@@ -183,7 +183,12 @@ def test_htf_alignment_never_exposes_an_unclosed_bar():
             if tf is Timeframe.H1:
                 h1.append(closed)
         if len(h1):
+            # There is no forming bar on the bar that just closed a bucket, which is correct.
             forming = agg.forming().get(Timeframe.H1)
-            assert forming is not None
-            assert h1.last().ts < forming.ts, "the last stored H1 bar must precede the forming one"
-            assert h1.last().ts_close <= bar.ts_close
+            if forming is not None:
+                assert h1.last().ts < forming.ts, (
+                    "the last stored H1 bar must precede the forming one"
+                )
+            assert h1.last().ts_close <= bar.ts_close, (
+                "a stored H1 bar must never close after the base bar that revealed it"
+            )
