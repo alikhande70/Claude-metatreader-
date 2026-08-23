@@ -289,3 +289,60 @@ retry blind.
 overwrite it. The client id is therefore short (16 chars) and the reconciler treats
 `magic + symbol + volume + open time window` as a fallback identity. Documented as a residual
 risk in `docs/RUNBOOK.md`.
+
+---
+
+## ADR-014 — All higher timeframes are derived from one base timeframe
+
+**Status:** Accepted
+
+**Decision.** The system subscribes to a single base timeframe per symbol and aggregates
+every higher timeframe from it, in backtest and live alike. The broker's own HTF bars are
+fetched once at startup and compared as a diagnostic only.
+
+**Why.** Fetching M5 and H4 independently gives two series whose relationship is only
+approximately guaranteed: brokers differ on partial-bar reporting, on whether a bar with no
+ticks exists at all, and on exact server-time boundaries. A multi-timeframe strategy
+comparing them is then reasoning about a state that never existed simultaneously.
+Aggregating from one stream makes the relationship exact by construction. The cost — a
+deeper base-bar warm-up — is negligible (200 H4 bars need ~9,600 M5 bars).
+
+**Falsification.** `compare_series()` reports divergence against broker HTF bars at startup.
+Persistent divergence means our bar boundaries are wrong, not the broker's.
+
+---
+
+## ADR-015 — The temporal contract
+
+**Status:** Accepted
+
+**Decision.** A bar with open time `T` and period `P` is *knowable at* `T + P`. Its update
+is stamped `ts = T + P`; the engine clock is set from that; and a market order issued from
+that evaluation is filled at the first quote **at or after** `T + P` — in bar replay, the
+next bar's open plus spread and slippage. Never at the close of the signal bar.
+
+**Why.** Filling at the signal bar's close is the most common single source of inflated
+backtests, and it is invisible in the equity curve. Encoding the rule in the data source's
+timestamps rather than in the venue means every venue inherits it.
+
+**Enforcement.** `SimulatedVenue` refuses to fill from a quote older than the order.
+`tests/unit/test_no_lookahead.py` asserts the fill price equals the next bar's open ± cost.
+
+---
+
+## ADR-016 — Protective stops live at the broker, management happens on bar close
+
+**Status:** Accepted
+
+**Decision.** Every position carries a server-side SL (and TP where applicable) attached to
+the MT5 position itself. ATLAS never relies on its own process to close a losing trade.
+Discretionary management — moving to breakeven, trailing, partial exits, time stops — runs
+on the close of the management timeframe, not on every tick.
+
+**Why.** Two independent reasons. Safety: if the Python process, the network, or the VPS
+dies, the position still has a stop at the broker. Reproducibility: tick-triggered
+management makes results depend on tick delivery timing, which differs between the Strategy
+Tester, the simulator and live, so a bar-close rule is the only one that backtests honestly.
+
+**Consequence.** Trailing is coarser than a tick-level trail would be. That is an accepted
+trade for determinism, and the granularity is a tunable parameter (management timeframe).
