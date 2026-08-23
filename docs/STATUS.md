@@ -32,7 +32,7 @@ Nothing in the third column should be treated as working. That is the point of t
 | Projections & API | Concurrency: 48 simultaneous refreshes produce no duplicates. Unknown ≠ zero. Controls refuse when not attached; a drawdown halt cannot be cleared from the dashboard. Static route provably contained |
 | Dashboard | Built, served, rendered in light and dark, screenshotted across all five pages, zero console errors |
 
-**316 tests.** `ruff` clean, `mypy` clean across all 67 modules, TypeScript strict.
+**316 tests.** `ruff` clean, `mypy` clean across all 65 modules, TypeScript strict.
 
 ---
 
