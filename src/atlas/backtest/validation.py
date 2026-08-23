@@ -142,9 +142,15 @@ class OutlierDependence:
     survives: bool
 
     def summary(self) -> str:
+        # The share is only meaningful when there were gross winners to take a share OF. On a
+        # losing sample it produced figures like "-127% of gross", which is arithmetic noise
+        # dressed as a finding.
+        share = f" ({self.top5_share:.0%} of gross profit came from them)" if (
+            0.0 <= self.top5_share <= 1.5
+        ) else ""
         return (
             f"total {self.full_total_r:+.1f}R, {self.without_top5_r:+.1f}R without the best "
-            f"five trades ({self.top5_share:.0%} of gross came from them) -- "
+            f"five trades{share} -- "
             f"{'survives' if self.survives else 'DOES NOT SURVIVE'}"
         )
 

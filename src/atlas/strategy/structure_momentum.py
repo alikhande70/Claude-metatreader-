@@ -26,7 +26,7 @@ from atlas.core.decision import (
 from atlas.core.enums import DecisionOutcome, ExitReason, Side, StructureEvent, Timeframe
 from atlas.core.errors import ConfigError
 from atlas.data.calendar import currencies_of
-from atlas.features.frame import FeatureFrame
+from atlas.features.frame import FrameLike
 from atlas.strategy.base import ManagementAction, Strategy, StrategyContext
 from atlas.strategy.regime import RegimeConfig, classify
 
@@ -263,7 +263,7 @@ class StructureMomentum(Strategy):
 
     # -- stages -----------------------------------------------------------------
 
-    def _bias(self, htf: FeatureFrame) -> Side | None:
+    def _bias(self, htf: FrameLike) -> Side | None:
         state = htf.structure.last().break_state
         close = float(htf.close[-1])
         ema = float(htf.ema_slow[-1])
@@ -274,7 +274,7 @@ class StructureMomentum(Strategy):
         return None
 
     def _hard_vetoes(
-        self, ctx: StrategyContext, ltf: FeatureFrame, gates: list[GateResult]
+        self, ctx: StrategyContext, ltf: FrameLike, gates: list[GateResult]
     ) -> tuple[str, str] | None:
         p = self.p
         cal = ctx.calendar
@@ -322,7 +322,7 @@ class StructureMomentum(Strategy):
                 return ("NEWS_WINDOW", f"high-impact {ev.currency} event: {ev.title}")
         return None
 
-    def _mtf_setup(self, mtf: FeatureFrame, bias: Side) -> tuple[bool, str]:
+    def _mtf_setup(self, mtf: FrameLike, bias: Side) -> tuple[bool, str]:
         p = self.p
         snap = mtf.structure.last()
         want = "BULL" if bias is Side.BUY else "BEAR"
@@ -339,7 +339,7 @@ class StructureMomentum(Strategy):
             return False, f"no {bias} structural break in the last {p.setup_lookback} {p.mtf} bars"
         return True, f"{hit[-1]} within {p.setup_lookback} {p.mtf} bars"
 
-    def _ltf_trigger(self, ltf: FeatureFrame, bias: Side) -> tuple[bool, str]:
+    def _ltf_trigger(self, ltf: FrameLike, bias: Side) -> tuple[bool, str]:
         p = self.p
         ev = ltf.structure.last().event
         wanted = (
@@ -354,7 +354,7 @@ class StructureMomentum(Strategy):
         return True, f"{ev} with body ratio {body:.2f}"
 
     def _build_trade(
-        self, ctx: StrategyContext, mtf: FeatureFrame, ltf: FeatureFrame, bias: Side
+        self, ctx: StrategyContext, mtf: FrameLike, ltf: FrameLike, bias: Side
     ) -> tuple[ProposedTrade | None, list[GateResult], str | None]:
         p = self.p
         spec = ctx.spec
@@ -411,7 +411,7 @@ class StructureMomentum(Strategy):
         )
 
     def _score(
-        self, ctx: StrategyContext, htf: FeatureFrame, mtf: FeatureFrame, ltf: FeatureFrame,
+        self, ctx: StrategyContext, htf: FrameLike, mtf: FrameLike, ltf: FrameLike,
         bias: Side, reg, loc_value: float, proposal: ProposedTrade,
     ) -> list[EvidenceItem]:
         p = self.p

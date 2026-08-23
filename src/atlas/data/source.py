@@ -21,7 +21,7 @@ The simulated venue enforces it (it refuses to fill from a quote earlier than th
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Iterable, Iterator, Sequence
+from collections.abc import AsyncIterator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -85,7 +85,7 @@ class ReplayDataSource(MarketDataSource):
 
     def __init__(
         self,
-        bars_by_symbol: dict[str, Sequence[Bar]],
+        bars_by_symbol: Mapping[str, Sequence[Bar]],
         specs: dict[str, SymbolSpec],
         *,
         base_tf: Timeframe,

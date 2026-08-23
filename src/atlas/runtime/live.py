@@ -165,22 +165,12 @@ async def build_live_engine(cfg, *, paper: bool = False) -> tuple[TradingEngine,
                        {"source": "terminal", "level": level, "message": message})
 
     venue: ExecutionVenue
-    if paper or cfg.venue.kind == "sim":
-        from atlas.venues.sim.venue import SimConfig, SimulatedVenue
-
-        configured = {s.symbol: s.spec for s in cfg.symbols if s.spec is not None}
-        if len(configured) != len(symbols):
-            raise ConfigError(
-                "paper mode needs a symbol spec for every symbol in the config; run "
-                "'atlas bridge-check' against a live terminal to read the real values"
-            )
-        venue = SimulatedVenue(
-            configured,
-            config=SimConfig(starting_balance=cfg.venue.starting_balance,
-                             leverage=cfg.venue.leverage),
+    if cfg.venue.kind == "sim" and not paper:
+        raise ConfigError(
+            "venue.kind is 'sim' with no market feed. Offline paper trading is just a "
+            "backtest -- use 'atlas backtest'. For paper trading against live prices, point "
+            "venue.kind at the bridge and pass --paper."
         )
-        await venue.connect()
-        specs = dict(configured)
     else:
         bridge = BridgeVenue(
             command_endpoint=cfg.venue.command_endpoint,
@@ -190,8 +180,24 @@ async def build_live_engine(cfg, *, paper: bool = False) -> tuple[TradingEngine,
             clock=clock,
         )
         await bridge.connect(wait_seconds=120)
-        venue = bridge
-        specs = await bridge.symbol_specs(symbols)
+        if paper:
+            # Real quotes, pretend money. The simulator prices against the broker's own
+            # specification, so a paper session rehearses the live one rather than a
+            # different system with the same name.
+            from atlas.venues.paper import PaperVenue
+            from atlas.venues.sim.venue import SimConfig, SimulatedVenue
+
+            venue = PaperVenue(
+                bridge,
+                SimulatedVenue({}, config=SimConfig(
+                    starting_balance=cfg.venue.starting_balance,
+                    leverage=cfg.venue.leverage,
+                )),
+            )
+            await venue.connect()
+        else:
+            venue = bridge
+        specs = await venue.symbol_specs(symbols)
         missing = set(symbols) - set(specs)
         if missing:
             raise ConfigError(

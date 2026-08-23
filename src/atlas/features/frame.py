@@ -314,22 +314,87 @@ class FrameView:
     def values(self, i: int = -1) -> dict[str, float]:
         return self._f.values(self._i if i == -1 else i)
 
+    # Array accessors are written out rather than generated with setattr in a loop.
+    # The loop was shorter and it defeated both the type checker and editor completion --
+    # mypy reported every use of `view.atr` as an attribute error on a union, which is
+    # exactly the class of mistake a type checker exists to catch. Each of these returns a
+    # numpy VIEW (`arr[:i+1]`), so it is still O(1) and still shares memory.
 
-def _view_array(name: str):
-    def getter(self: FrameView) -> np.ndarray:
-        return getattr(self._f, name)[: self._i + 1]
+    @property
+    def ts(self) -> np.ndarray:
+        return self._f.ts[: self._i + 1]
 
-    getter.__name__ = name
-    return property(getter)
+    @property
+    def open(self) -> np.ndarray:
+        return self._f.open[: self._i + 1]
 
+    @property
+    def high(self) -> np.ndarray:
+        return self._f.high[: self._i + 1]
 
-for _name in (
-    "ts", "open", "high", "low", "close", "atr", "atr_pct", "adx", "plus_di", "minus_di",
-    "rsi", "er", "ema_fast", "ema_slow", "donchian_high", "donchian_low", "body_ratio",
-    "displacement", "realized_vol",
-):
-    setattr(FrameView, _name, _view_array(_name))
-del _name
+    @property
+    def low(self) -> np.ndarray:
+        return self._f.low[: self._i + 1]
+
+    @property
+    def close(self) -> np.ndarray:
+        return self._f.close[: self._i + 1]
+
+    @property
+    def atr(self) -> np.ndarray:
+        return self._f.atr[: self._i + 1]
+
+    @property
+    def atr_pct(self) -> np.ndarray:
+        return self._f.atr_pct[: self._i + 1]
+
+    @property
+    def adx(self) -> np.ndarray:
+        return self._f.adx[: self._i + 1]
+
+    @property
+    def plus_di(self) -> np.ndarray:
+        return self._f.plus_di[: self._i + 1]
+
+    @property
+    def minus_di(self) -> np.ndarray:
+        return self._f.minus_di[: self._i + 1]
+
+    @property
+    def rsi(self) -> np.ndarray:
+        return self._f.rsi[: self._i + 1]
+
+    @property
+    def er(self) -> np.ndarray:
+        return self._f.er[: self._i + 1]
+
+    @property
+    def ema_fast(self) -> np.ndarray:
+        return self._f.ema_fast[: self._i + 1]
+
+    @property
+    def ema_slow(self) -> np.ndarray:
+        return self._f.ema_slow[: self._i + 1]
+
+    @property
+    def donchian_high(self) -> np.ndarray:
+        return self._f.donchian_high[: self._i + 1]
+
+    @property
+    def donchian_low(self) -> np.ndarray:
+        return self._f.donchian_low[: self._i + 1]
+
+    @property
+    def body_ratio(self) -> np.ndarray:
+        return self._f.body_ratio[: self._i + 1]
+
+    @property
+    def displacement(self) -> np.ndarray:
+        return self._f.displacement[: self._i + 1]
+
+    @property
+    def realized_vol(self) -> np.ndarray:
+        return self._f.realized_vol[: self._i + 1]
 
 
 #: Anything a strategy can read features from: a live frame, or a historical view of one.

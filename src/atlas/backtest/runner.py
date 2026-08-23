@@ -11,6 +11,7 @@ statistics, so the report can answer "why did it not trade more?" as readily as
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -91,7 +92,8 @@ class BacktestResult:
 
 
 def _build_series(
-    bars: dict[str, list[Bar]], base_tf: Timeframe, timeframes: dict[str, tuple[Timeframe, ...]]
+    bars: Mapping[str, Sequence[Bar]], base_tf: Timeframe,
+    timeframes: dict[str, tuple[Timeframe, ...]],
 ) -> dict[tuple[str, Timeframe], BarSeries]:
     out: dict[tuple[str, Timeframe], BarSeries] = {}
     for symbol, bl in bars.items():
@@ -108,7 +110,7 @@ def _build_series(
 
 async def run_backtest(
     *,
-    bars: dict[str, list[Bar]],
+    bars: Mapping[str, Sequence[Bar]],
     specs: dict[str, SymbolSpec],
     strategies: dict[str, Strategy],
     journal_dir: Path | str,

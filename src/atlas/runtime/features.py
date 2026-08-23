@@ -26,6 +26,7 @@ from atlas.data.series import BarSeries
 from atlas.features.frame import (
     FeatureConfig,
     FeatureFrame,
+    FrameLike,
     MultiTimeframeFeatures,
 )
 
@@ -56,7 +57,7 @@ class PrecomputedFeatureProvider(FeatureProvider):
         self._series = dict(bars)
         self._by_symbol: dict[str, MultiTimeframeFeatures] = {}
         for symbol in {s for s, _ in bars}:
-            frames = {
+            frames: dict[Timeframe, FrameLike] = {
                 tf: FeatureFrame.compute(series, specs[symbol], cfg)
                 for (s, tf), series in bars.items()
                 if s == symbol and len(series) > cfg.ema_slow
@@ -161,7 +162,7 @@ class IncrementalFeatureProvider(FeatureProvider):
         # Position each frame at its last bar closed by ts_ms. In live operation that is
         # almost always the final bar, but being explicit keeps the semantics identical to
         # the precomputed provider rather than merely usually equal.
-        out = {}
+        out: dict[Timeframe, FrameLike] = {}
         for tf, f in frames.items():
             v = f.view_at(ts_ms)
             if v is not None:

@@ -467,7 +467,7 @@ def find_liquidity_pools(
                 pools.append(
                     LiquidityPool(
                         price=float(np.mean([g.price for g in group])),
-                        kind=kind,  # type: ignore[arg-type]
+                        kind=kind,
                         touches=len(group),
                         last_index=max(g.confirmed_index for g in group),
                     )

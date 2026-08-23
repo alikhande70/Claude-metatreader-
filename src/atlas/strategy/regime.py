@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from atlas.core.enums import Regime
-from atlas.features.frame import FeatureFrame
+from atlas.features.frame import FrameLike
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +51,7 @@ class RegimeAssessment:
         return self.regime is Regime.HIGH_VOL_SHOCK
 
 
-def classify(frame: FeatureFrame, cfg: RegimeConfig, i: int = -1) -> RegimeAssessment:
+def classify(frame: FrameLike, cfg: RegimeConfig, i: int = -1) -> RegimeAssessment:
     if not frame.ready(i):
         return RegimeAssessment(Regime.UNKNOWN, 0.0, 0.0, 0.0, "features not warmed up")
     i = i if i >= 0 else frame.n + i

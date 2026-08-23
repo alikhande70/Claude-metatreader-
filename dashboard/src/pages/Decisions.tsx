@@ -18,9 +18,10 @@ export function Decisions() {
   const [outcome, setOutcome] = useState('')
   const [reason, setReason] = useState('')
   const [selected, setSelected] = useState<Decision | null>(null)
+  const [limit, setLimit] = useState(100)
   const { data: funnel } = usePoll(api.funnel, 5000)
   const { data, error } = usePoll(
-    () => api.decisions({ limit: 300, outcome: outcome || undefined,
+    () => api.decisions({ limit, outcome: outcome || undefined,
                           reason: reason || undefined }),
     4000,
   )
@@ -44,6 +45,8 @@ export function Decisions() {
         ) : <Empty>no decisions recorded yet</Empty>}
       </Card>
 
+      {selected && <DecisionDetail decision={selected} onClose={() => setSelected(null)} />}
+
       <Card title="Decisions">
         <div className="row">
           <label>
@@ -61,13 +64,19 @@ export function Decisions() {
               ))}
             </select>
           </label>
-          <span className="muted">{data ? `${data.length} shown` : ''}</span>
+          <label>
+            show{' '}
+            <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
+              {[50, 100, 300, 1000].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+          <span className="muted">{data ? `${data.length} shown, newest first` : ''}</span>
         </div>
 
         {data?.length ? (
-          <div className="scroll-x">
+          <div className="scroll-x" style={{ maxHeight: 520, overflowY: 'auto' }}>
             <table>
-              <thead>
+              <thead style={{ position: 'sticky', top: 0, background: 'var(--surface-1)' }}>
                 <tr>
                   <th>time</th><th>symbol</th><th>outcome</th><th>reason</th>
                   <th>regime</th><th className="num">conviction</th>
@@ -100,7 +109,6 @@ export function Decisions() {
         ) : <Empty>no decisions match this filter</Empty>}
       </Card>
 
-      {selected && <DecisionDetail decision={selected} onClose={() => setSelected(null)} />}
     </div>
   )
 }

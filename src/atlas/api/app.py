@@ -339,10 +339,15 @@ def create_app(settings, run_dir: Path | str, engine=None) -> FastAPI:
 
         @app.get("/{path:path}")
         def spa(path: str) -> FileResponse:
-            candidate = static_dir / path
-            if candidate.is_file():
+            # Containment is checked explicitly rather than relying on the router to have
+            # normalised the path first. Starlette does normalise it today, so a `../`
+            # traversal is already collapsed before it arrives -- but a route that serves
+            # arbitrary files should not depend on a framework behaviour to be safe.
+            root = static_dir.resolve()
+            candidate = (root / path).resolve()
+            if candidate.is_file() and candidate.is_relative_to(root):
                 return FileResponse(candidate)
-            return FileResponse(static_dir / "index.html")
+            return FileResponse(root / "index.html")
     else:
         @app.get("/")
         def missing_ui() -> JSONResponse:

@@ -192,6 +192,19 @@ def test_websocket_greets(client):
         assert hello["attached"] is False
 
 
+@pytest.mark.parametrize("probe", [
+    "../../../../etc/passwd",
+    "..%2f..%2f..%2f..%2fetc%2fpasswd",
+    "%2e%2e/%2e%2e/%2e%2e/etc/passwd",
+    "assets/../../../../etc/passwd",
+])
+def test_static_route_cannot_escape_its_directory(client, probe):
+    """The SPA fallback serves files by path, so it must be provably contained."""
+    response = client.get(f"/{probe}")
+    assert "root:" not in response.text
+    assert response.status_code in (200, 404)
+
+
 def test_missing_dashboard_bundle_is_reported_not_blank(client):
     response = client.get("/")
     # Either the bundle is built (200) or the API explains how to build it (503).

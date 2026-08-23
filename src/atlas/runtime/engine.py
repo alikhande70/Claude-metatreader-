@@ -395,8 +395,9 @@ class TradingEngine:
         for ticket in list(self.tracker.tickets()):
             if ticket in live_by_ticket:
                 continue
-            tp = self.tracker.remove(ticket)
-            if tp is not None:
+            removed = self.tracker.remove(ticket)
+            if removed is not None:
+                tp = removed
                 self.journal.append(EventKind.POSITION_CLOSED, {
                     "ticket": ticket, "decision_id": tp.decision_id,
                 }, stream=tp.symbol, ts=ts)

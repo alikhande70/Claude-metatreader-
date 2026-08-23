@@ -125,7 +125,10 @@ def analyse_run(run_dir: Path | str, starting_balance: float = 10_000.0) -> str:
     if not funnel:
         lines.append("  (no decision records journalled)")
     for code, n, share in funnel:
-        lines.append(f"  {code:28s} {n:7d}  {share:6.1%}")
+        # A share under 0.05% renders as "0.0%", which reads as "never" for the outcome that
+        # matters most -- the one where the system actually decided to trade.
+        pct_text = f"{share:6.1%}" if share >= 0.001 else f"{share:6.3%}"
+        lines.append(f"  {code:28s} {n:7d}  {pct_text}")
     lines.append("")
 
     slip = slippage_report(data["fills"])

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from itertools import pairwise
 
 import pytest
 
@@ -111,7 +112,7 @@ def test_equity_buffer_decimates_rather_than_dropping_the_head(tmp_path):
     assert len(curve) <= 100
     assert curve[-1][0] == 499 * 1000, "the curve must end at the newest point"
     assert curve[0][0] <= 0.05 * curve[-1][0], "and start near the beginning of the run"
-    gaps = [b[0] - a[0] for a, b in zip(curve, curve[1:], strict=False)]
+    gaps = [b[0] - a[0] for a, b in pairwise(curve)]
     # The grid is uniform; only the final "tip" gap may differ, and it exists so the curve
     # always ends at the newest point rather than lagging by up to one stride.
     # Every gap except the final tip is identical: no phase seam anywhere in the chart.

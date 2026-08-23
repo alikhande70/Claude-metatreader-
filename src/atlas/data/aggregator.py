@@ -17,7 +17,7 @@ server-time or missing-bar issue) and is worth surfacing rather than absorbing.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 
 from atlas.core.enums import Timeframe
 from atlas.core.errors import DataError
@@ -193,7 +193,9 @@ def aggregate(bars: Iterable[Bar], base_tf: Timeframe, target_tf: Timeframe) -> 
             yield out
 
 
-def compare_series(ours: list[Bar], theirs: list[Bar], tol: float = 1e-9) -> list[str]:
+def compare_series(
+    ours: Sequence[Bar], theirs: Sequence[Bar], tol: float = 1e-9
+) -> list[str]:
     """Diagnostic: report where our aggregated bars differ from the broker's own.
 
     Returns human-readable difference descriptions. An empty list means the broker's bar

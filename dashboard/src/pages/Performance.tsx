@@ -98,10 +98,10 @@ export function Performance() {
                 ? 'beyond 1R: slippage or a gap through the stop' : undefined} />
       </div>
 
-      <Card title="Trades" sub={`${trades?.length ?? 0} most recent`}>
-        <div className="scroll-x">
+      <Card title="Trades" sub={`${trades?.length ?? 0} most recent, newest first`}>
+        <div className="scroll-x" style={{ maxHeight: 520, overflowY: 'auto' }}>
           <table>
-            <thead>
+            <thead style={{ position: 'sticky', top: 0, background: 'var(--surface-1)' }}>
               <tr>
                 <th>opened</th><th>symbol</th><th>side</th><th className="num">volume</th>
                 <th className="num">entry</th><th className="num">exit</th>
