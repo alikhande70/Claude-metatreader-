@@ -123,3 +123,4 @@ and the decision to risk capital is yours.
 | `docs/PROTOCOL.md` | the MetaTrader 5 bridge wire protocol |
 | `docs/RUNBOOK.md` | deployment, the go-live checklist, and what to do when things break |
 | `docs/STATUS.md` | Implemented / Verified / Requires-real-environment |
+| `docs/VERIFICATION.md` | the ordered gates from here to a verified demo round trip, and what counts as proof for each |

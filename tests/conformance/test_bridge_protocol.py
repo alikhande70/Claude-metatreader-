@@ -443,3 +443,52 @@ def test_order_result_status_mapping():
     rejected = p.parse_order_result("c", {"retcode": 10016}, 0)
     assert rejected.status is OrderStatus.REJECTED and not rejected.accepted
     assert "INVALID_STOPS" in rejected.retcode_text
+
+
+# --- the capture -> check loop ---------------------------------------------------------
+
+
+async def test_bridge_check_artifact_round_trips_into_preflight(gold, tmp_path):
+    """The whole point of the artifact: what a terminal reports must survive to a machine
+    that has no terminal, and be checkable there without anyone retyping a number.
+
+    This captures from a live socket, writes the file, reloads it, and checks a config
+    against it -- first a config that disagrees, then the same config after adopting the
+    broker's values.
+    """
+    import json as _json
+
+    from atlas.config.settings import AtlasSettings, SymbolSettings, VenueSettings
+    from atlas.venues.mt5 import preflight as pf
+
+    async with harness(gold) as (h, _, _):
+        health = await h.venue.connect(wait_seconds=3)
+        h.advance(q(gold, MIN, 2400.0))
+        account = await h.venue.account()
+        specs = await h.venue.symbol_specs([gold.name])
+        quotes = {gold.name: await h.venue.quote(gold.name)}
+        artifact = pf.capture(
+            health=health, account=account, specs=specs, quotes=quotes,
+            requested=[gold.name], captured_at_ms=MIN,
+            impl=str(h.venue.capabilities.extra.get("impl", "")),
+        )
+
+    path = tmp_path / "bridge-check.json"
+    path.write_text(_json.dumps(artifact, indent=2), encoding="utf-8")
+    reloaded = pf.load_artifact(path)
+    assert reloaded == artifact, "the artifact must survive a JSON round trip unchanged"
+
+    # A config whose spec disagrees with the broker on the one number that sizes everything.
+    wrong = gold.model_copy(update={"tick_value": 10.0})
+    cfg_path = tmp_path / "atlas.json"
+    cfg = AtlasSettings(symbols=[SymbolSettings(symbol=gold.name, spec=wrong)],
+                        venue=VenueSettings(kind="mt5_bridge"))
+    cfg_path.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+
+    before = pf.evaluate(AtlasSettings.load(cfg_path), reloaded)
+    assert not before.ok
+    assert any("tick_value" in f.message for f in before.failures)
+
+    assert pf.adopt_specs(cfg_path, reloaded) == [gold.name]
+    after = pf.evaluate(AtlasSettings.load(cfg_path), reloaded)
+    assert after.ok, [str(f) for f in after.failures]

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
 import typer
@@ -284,9 +285,19 @@ def live(
 def bridge_check(
     config: Path = typer.Argument(Path("atlas.json")),
     symbol: str | None = typer.Option(None, "--symbol"),
+    json_out: Path | None = typer.Option(
+        None, "--json",
+        help="also write a machine-readable artifact, for `atlas preflight` to check offline",
+    ),
 ) -> None:
-    """Probe a running MT5 bridge: connectivity, specs, clock offset, permissions."""
+    """Probe a running MT5 bridge: connectivity, specs, clock offset, permissions.
+
+    With --json this also writes the one artifact that carries everything only a live
+    terminal can answer. Whoever holds the terminal is often not whoever is editing the
+    config, and a spec read off a screen and retyped is a spec that can be retyped wrong.
+    """
     from atlas.config.settings import AtlasSettings
+    from atlas.venues.mt5 import preflight as pf
     from atlas.venues.mt5.bridge import BridgeVenue
 
     cfg = AtlasSettings.load(config)
@@ -325,10 +336,26 @@ def bridge_check(
             if missing:
                 console.print(f"[red]not available at the broker: {sorted(missing)}[/red] "
                               f"-- check for a suffix such as .m or _i")
+            quotes = {}
             for name in specs:
                 q = await venue.quote(name)
+                quotes[name] = q
                 console.print(f"{name}: bid {q.bid} ask {q.ask} spread "
                               f"{q.spread_points(specs[name].point):.0f} pts")
+            if json_out is not None:
+                artifact = pf.capture(
+                    health=health, account=acct, specs=specs, quotes=quotes,
+                    requested=syms, captured_at_ms=int(time.time() * 1000),
+                    impl=str(venue.capabilities.extra.get("impl", "")),
+                    build=int(venue.capabilities.extra.get("build", 0) or 0),
+                    errors=[f"symbol not available at this broker: {m}"
+                            for m in sorted(missing)],
+                )
+                json_out.parent.mkdir(parents=True, exist_ok=True)
+                json_out.write_text(json.dumps(artifact, indent=2) + "\n", encoding="utf-8")
+                console.print(f"\nwrote {json_out}")
+                console.print("check it against a config with: "
+                              f"[bold]atlas preflight {config} {json_out}[/bold]")
         finally:
             await venue.disconnect()
 
@@ -336,6 +363,56 @@ def bridge_check(
         asyncio.run(probe())
     except AtlasError as exc:
         _fail(str(exc))
+
+
+@app.command("preflight")
+def preflight(
+    config: Path = typer.Argument(Path("atlas.json")),
+    artifact: Path = typer.Argument(..., help="a bridge-check --json artifact"),
+    adopt_specs: bool = typer.Option(
+        False, "--adopt-specs",
+        help="write the broker's specifications into the config, replacing any override",
+    ),
+) -> None:
+    """Check a config against what a broker actually reported. No terminal needed.
+
+    Takes the artifact `atlas bridge-check --json` wrote on the machine that has the
+    terminal, and answers -- offline, here -- whether this config would trade correctly
+    against that broker. Every finding names the consequence, because "digits: 2 vs 3" means
+    nothing until it is spelled "every position would be sized ten times too large".
+
+    Exits non-zero if anything would fail.
+    """
+    from atlas.config.settings import AtlasSettings
+    from atlas.venues.mt5 import preflight as pf
+
+    cfg = AtlasSettings.load(config)
+    try:
+        payload = pf.load_artifact(artifact)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+        _fail(str(exc))
+
+    report = pf.evaluate(cfg, payload)
+    colours = {"PASS": "green", "WARN": "yellow", "FAIL": "red"}
+    for finding in report.findings:
+        colour = colours[finding.level]
+        console.print(f"[{colour}]{finding.level:<4}[/{colour}] "
+                      f"{finding.check}: {finding.message}")
+        if finding.fix:
+            console.print(f"       [dim]{finding.fix}[/dim]")
+
+    if adopt_specs:
+        changed = pf.adopt_specs(config, payload)
+        if changed:
+            console.print(f"\nadopted the broker's specification for: {', '.join(changed)}")
+            console.print("[dim]re-run preflight to confirm the mismatches are gone[/dim]")
+        else:
+            console.print("\nno specification in the config needed changing")
+
+    console.print(f"\n{len(report.failures)} failing, {len(report.warnings)} to decide, "
+                  f"{len(report.findings)} checked")
+    if not report.ok:
+        raise typer.Exit(1)
 
 
 @app.command("show-decisions")

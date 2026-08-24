@@ -67,6 +67,10 @@ Recorded because they were all subtle, all found by testing, and all easy to rei
 - Metrics attach their own caveats (small sample, implausible profit factor, cost-constrained).
 - `docs/STATUS.md` separates Implemented / Verified / Requires-real-environment. The MQL5 code
   is in the third column and must stay there until someone compiles and runs it.
+- `docs/VERIFICATION.md` is how the third column gets emptied: ordered gates, one action and
+  one artifact each. **A gate closes on a file in `evidence/`, never on a report that it
+  worked.** `make mql5check` type-checks the MQL5 under a C++ shim and is explicitly *not* a
+  MetaEditor compile — a PASS there moves nothing.
 
 ## Adding things
 

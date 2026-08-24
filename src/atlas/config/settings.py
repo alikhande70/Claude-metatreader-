@@ -28,8 +28,10 @@ class VenueSettings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: str = "sim"  # sim | mt5_bridge
-    #: ZeroMQ endpoints for the MT5 bridge. The REQ/REP socket carries commands; the
-    #: PUB/SUB socket carries pushed quotes and trade transactions.
+    #: Where ATLAS LISTENS for the terminal-side bridge. MQL5 provides outbound sockets
+    #: only, so the terminal connects out and ATLAS accepts (ADR-005, as amended). Commands
+    #: and pushed events share one connection; `event_endpoint` is retained for deployments
+    #: that separate them.
     command_endpoint: str = "tcp://127.0.0.1:5555"
     event_endpoint: str = "tcp://127.0.0.1:5556"
     request_timeout_ms: int = 5000

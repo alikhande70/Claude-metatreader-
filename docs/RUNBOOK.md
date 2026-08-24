@@ -40,15 +40,24 @@ same positions. One chart.
 
 ```bash
 export ATLAS_BRIDGE_TOKEN='...'
-atlas bridge-check atlas.json
+atlas bridge-check atlas.json --json evidence/G5-bridge-check.json
+atlas preflight atlas.json evidence/G5-bridge-check.json --adopt-specs
 ```
 
-This prints connectivity, the measured server clock offset, the account, and **the broker's
-real symbol specification**. Copy those values into your config — do not trust the example
-ones. Gold is 2 digits on some brokers and 3 on others, and the symbol may be `XAUUSD.m`,
-`GOLD` or `XAUUSD_i`.
+`bridge-check` prints connectivity, the measured server clock offset, the account and **the
+broker's real symbol specification**, and with `--json` captures all of it as one artifact.
+`preflight` then checks a config against that artifact — offline, on any machine — and
+`--adopt-specs` writes the broker's values in, so nothing is retyped. A specification that is
+retyped is a specification that can be retyped wrong, and none of these failures throw: gold
+is 2 digits at some brokers and 3 at others, contract size is 100 oz or 10, and each of those
+silently changes every position size.
 
-If a symbol is missing, the suffix is almost always the reason.
+If a symbol is missing, the suffix is almost always the reason — `XAUUSD.m`, `GOLD`,
+`XAUUSD_i` and `XAUUSD.pro` are all real names for the same instrument.
+
+The first time through, follow **`docs/VERIFICATION.md`** rather than this section: it
+sequences the whole boundary from the MetaEditor compile to a demo round trip, and says what
+artifact closes each step.
 
 ---
 
@@ -58,7 +67,8 @@ Work down it. Each item exists because skipping it has a specific consequence.
 
 - [ ] **`atlas doctor atlas.json` is clean.** It checks the things that silently change every
       position size.
-- [ ] **Symbol specs came from `bridge-check`**, not from the example config.
+- [ ] **`atlas preflight` exits zero** against a fresh `bridge-check --json` capture. Specs
+      came from the broker, not from the example config.
 - [ ] **The strategy was validated on real history**, not synthetic data. `atlas validate`
       wrote a report and its verdict is APPROVED. If the sample was too small it will say so
       — that is a finding, not an obstacle to route around.

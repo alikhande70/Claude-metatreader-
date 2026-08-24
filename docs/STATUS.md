@@ -10,6 +10,8 @@ Three columns, kept honestly separate:
   terminal and a broker.
 
 Nothing in the third column should be treated as working. That is the point of the column.
+`docs/VERIFICATION.md` is the ordered plan for emptying it, gate by gate, and says what
+counts as proof for each.
 
 ---
 
@@ -32,9 +34,10 @@ Nothing in the third column should be treated as working. That is the point of t
 | Projections & API | Concurrency: 48 simultaneous refreshes produce no duplicates. Unknown ≠ zero. Controls refuse when not attached; a drawdown halt cannot be cleared from the dashboard. Static route provably contained |
 | Sidecar protocol half | 20 conformance tests run the **real** `sidecar/atlas_mt5_sidecar.py` — its own dispatch, framing and payload builders — against a fake `MetaTrader5` package backed by the matching engine, over a real socket. Handshake, auth refusal, specs round trip, server-offset inference, closed-bar-only history, order send, stops-level and volume refusals, idempotency lookup, magic isolation, pending round trip, deal pairing, tick and bar streaming |
 | MQL5 sources | Type-checked under a C++ shim of the MQL5 API (`make mql5check`): names, arity, argument types and property-enum families. **This is not a compile** — see the row below and `tools/mql5check/README.md`. Eight mutation tests prove the checker can fail |
+| Preflight | The capture→check loop: a `bridge-check` artifact taken over a real socket survives a JSON round trip and is then evaluated against a config with no venue present. Every sizing field disagreement fails; a minimum lot that cannot fit the risk budget fails; `--adopt-specs` clears it. 25 tests |
 | Dashboard | Built, served, rendered in light and dark, screenshotted across all five pages, zero console errors |
 
-**345 tests.** `ruff` clean, `mypy` clean across all 67 modules, TypeScript strict.
+**370 tests.** `ruff` clean, `mypy` clean across all 68 modules, TypeScript strict.
 
 ---
 
@@ -46,7 +49,7 @@ Nothing in the third column should be treated as working. That is the point of t
 | `mql5/Include/Atlas/*.mqh` | same | same |
 | `sidecar/atlas_mt5_sidecar.py` — its MT5 calls | Its protocol half is now verified (above). What remains unverified is whether the real `MetaTrader5` package behaves as `tests/conformance/fake_mt5.py` says it does: attribute names and call shapes there are transcribed from documentation, and a transcription can be wrong | Run on Windows beside a terminal; `atlas bridge-check` proves the round trip |
 | Real fills, slippage, requotes | no broker | Paper-trade, then compare realised slippage against the model with `atlas analyse` |
-| Broker symbol specs | no broker | `atlas bridge-check` prints what the broker actually reports; put those values in the config |
+| Broker symbol specs | no broker | `atlas bridge-check --json` captures them; `atlas preflight … --adopt-specs` writes them into the config, so nothing is retyped |
 | MQL5 socket permission | terminal setting | Add the ATLAS host under Tools → Options → Expert Advisors |
 | Server clock offset / DST | no broker clock | Measured at connect and re-measured; verify in `atlas bridge-check` output |
 
