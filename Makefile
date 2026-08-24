@@ -1,4 +1,4 @@
-.PHONY: help install test test-fast lint typecheck dashboard demo clean check
+.PHONY: help install test test-fast lint typecheck mql5check dashboard demo clean check
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -13,15 +13,18 @@ test-fast:  ## run everything except the slow engine-equivalence run
 	pytest -m "not slow"
 
 lint:  ## ruff
-	ruff check src tests sidecar --line-length 100
+	ruff check src tests sidecar tools --line-length 100
 
 typecheck:  ## mypy
 	mypy
 
+mql5check:  ## type-check the MQL5 bridge sources under the C++ shim (NOT a MetaEditor compile)
+	python3 tools/mql5check/mql5check.py
+
 dashboard:  ## build the dashboard bundle into the API's static directory
 	cd dashboard && npm ci && npm run build
 
-check: lint test  ## what CI should run
+check: lint typecheck mql5check test  ## what CI should run
 
 demo:  ## a full offline demonstration: config, backtest with baseline, validation
 	atlas init --out /tmp/atlas-demo/atlas.json --force

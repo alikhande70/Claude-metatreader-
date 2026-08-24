@@ -16,9 +16,14 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev]"
       - name: Lint
-        run: ruff check src tests sidecar --line-length 100
+        run: ruff check src tests sidecar tools --line-length 100
       - name: Type check
         run: mypy
+      - name: MQL5 static check
+        # Not a MetaEditor compile -- see tools/mql5check/README.md. It catches the
+        # class of error that would otherwise be found only on the first round trip
+        # to someone's terminal.
+        run: python3 tools/mql5check/mql5check.py
       - name: Tests
         run: pytest -q
       - name: Sidecar imports cleanly without MetaTrader5

@@ -83,9 +83,16 @@ int OnInit()
 
    int n = ArraySize(g_symbols) * ArraySize(g_timeframes);
    ArrayResize(g_last_bar_time, n);
-   ArrayInitialize(g_last_bar_time, 0);
    ArrayResize(g_last_tick_ms, ArraySize(g_symbols));
-   ArrayInitialize(g_last_tick_ms, 0);
+   // Cleared by loop rather than by ArrayInitialize: that builtin is documented
+   // with overloads for the specific numeric types, and whether `datetime[]`
+   // binds to the `long` one is exactly the sort of thing that cannot be checked
+   // without MetaEditor. A loop is unambiguously valid for any array type, so
+   // this removes an unknown instead of betting on it.
+   for(int i = 0; i < n; i++)
+      g_last_bar_time[i] = 0;
+   for(int i = 0; i < ArraySize(g_last_tick_ms); i++)
+      g_last_tick_ms[i] = 0;
 
    // Seed the last-known bar time for every stream. Without this the EA would emit the
    // current, still-forming bar as if it had just closed on the first tick after start.
