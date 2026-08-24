@@ -26,10 +26,10 @@ jobs:
         run: python3 tools/mql5check/mql5check.py
       - name: Tests
         run: pytest -q
-      - name: Sidecar imports cleanly without MetaTrader5
-        # The sidecar is Windows-only in practice, but it must not fail to parse or import
-        # on a machine without the package -- that is how a deployment discovers a typo.
-        run: python -c "import ast,sys; ast.parse(open('sidecar/atlas_mt5_sidecar.py').read())"
+      # The sidecar used to be checked only for parsing, which catches a syntax error and
+      # nothing else. tests/conformance/test_sidecar_protocol.py now runs the real file
+      # against a fake MetaTrader5 package and a real socket, so the check above is
+      # subsumed by the test suite.
 
   dashboard:
     runs-on: ubuntu-latest

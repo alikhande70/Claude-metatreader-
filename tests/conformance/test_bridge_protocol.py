@@ -211,6 +211,31 @@ async def test_invalid_stops_are_rejected_with_the_broker_retcode(gold):
         assert "stops level" in r.retcode_text.lower() or "stops" in r.retcode_text.lower()
 
 
+async def test_an_accepted_pending_order_is_never_reported_as_filled():
+    """Regression: found by running the sidecar against the protocol.
+
+    MT5 has two success retcodes, 10008 PLACED and 10009 DONE, and current builds answer a
+    `TRADE_ACTION_PENDING` request with 10009 -- the same code a market fill gets. Deciding
+    the status from the retcode alone therefore reported a resting limit order as FILLED,
+    with `fill_price` 0.0 standing in for a price that does not exist yet.
+
+    ATLAS knows what it asked for, so it does not have to guess. The conformance fake
+    terminal had been returning 10008 for pending orders, which is legal but not what a
+    real server does, so this path was never exercised.
+    """
+    for retcode in (p.RETCODE_DONE, p.RETCODE_PLACED):
+        for otype in (OrderType.LIMIT, OrderType.STOP):
+            r = p.parse_order_result("c", {"retcode": retcode, "volume": 0.0, "price": 0.0},
+                                     0, order_type=otype)
+            assert r.accepted
+            assert r.status is OrderStatus.WORKING, (retcode, otype)
+    market = p.parse_order_result("c", {"retcode": p.RETCODE_DONE, "volume": 0.1,
+                                        "price": 2400.0}, 0, order_type=OrderType.MARKET)
+    assert market.status is OrderStatus.FILLED
+    # Without a declared type -- a modify or a close reply -- the retcode is all there is.
+    assert p.parse_order_result("c", {"retcode": p.RETCODE_DONE}, 0).status is OrderStatus.FILLED
+
+
 async def test_retcode_texts_are_mapped_not_invented():
     for code in (10004, 10014, 10016, 10019, 10030, 10031):
         assert "unmapped" not in p.retcode_text(code)

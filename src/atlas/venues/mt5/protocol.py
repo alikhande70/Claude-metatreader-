@@ -286,17 +286,42 @@ def order_send_args(req: OrderRequest, spec: SymbolSpec) -> dict[str, Any]:
     }
 
 
-def parse_order_result(client_order_id: str, d: dict[str, Any], ts: int) -> OrderResult:
+def parse_order_result(
+    client_order_id: str,
+    d: dict[str, Any],
+    ts: int,
+    *,
+    order_type: OrderType | None = None,
+) -> OrderResult:
+    """Turn a terminal's ``order_send`` reply into an ``OrderResult``.
+
+    ``order_type`` is what ATLAS *asked for*, and it takes precedence over the retcode when
+    deciding whether a position now exists.
+
+    The retcode alone cannot answer that. MT5 has two success codes -- 10008 PLACED and
+    10009 DONE -- and which one a server returns for a resting order is the server's choice;
+    current builds answer 10009 for `TRADE_ACTION_PENDING`. Reading that as FILLED would
+    make the engine believe it holds a position when it holds a limit order, with a fill
+    price of 0.0 standing in for a price that does not exist yet. ATLAS knows it sent a LIMIT
+    or a STOP, so it does not have to guess.
+
+    Omit ``order_type`` for replies that are not order placements (a modify or a close),
+    where the retcode is the only thing on offer.
+    """
     retcode = int(d.get("retcode", 0))
     accepted = retcode in SUCCESS_RETCODES
-    if retcode == RETCODE_PLACED:
+    resting = order_type is not None and order_type is not OrderType.MARKET
+    if not accepted:
+        status = OrderStatus.REJECTED
+    elif resting:
+        # An accepted pending order is resting at the venue, whichever success code it used.
+        status = OrderStatus.WORKING
+    elif retcode == RETCODE_PLACED:
         status = OrderStatus.WORKING
     elif retcode == RETCODE_DONE_PARTIAL:
         status = OrderStatus.PARTIALLY_FILLED
-    elif accepted:
-        status = OrderStatus.FILLED
     else:
-        status = OrderStatus.REJECTED
+        status = OrderStatus.FILLED
     return OrderResult(
         client_order_id=client_order_id, accepted=accepted, status=status, retcode=retcode,
         retcode_text=d.get("retcode_text") or retcode_text(retcode),

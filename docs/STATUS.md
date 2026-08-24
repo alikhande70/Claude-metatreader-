@@ -26,13 +26,15 @@ Nothing in the third column should be treated as working. That is the point of t
 | Execution economics | Fill on the next quote (not the signal bar's close); stop-before-target within a bar; slipped stops losing more than 1R; commission both sides; triple-swap day; margin stop-out; broker stops-level and lot-step rejections |
 | Order idempotency | A venue that lands the order then loses the response produces **exactly one position**, resolved by lookup — over an in-process venue and over a real TCP socket |
 | Engine equivalence | The research feature path and the live rolling path produce **byte-identical trades** on the same data. **Caught four real defects** |
-| Bridge protocol | 32 conformance tests: `BridgeVenue` over a real socket against a fake terminal backed by the real matching engine — handshake, auth, version rejection, specs, orders, retcodes, streaming, timeouts, disconnects |
+| Bridge protocol | 33 conformance tests: `BridgeVenue` over a real socket against a fake terminal backed by the real matching engine — handshake, auth, version rejection, specs, orders, retcodes, streaming, timeouts, disconnects |
 | Backtest pipeline | End-to-end runs on 90,000 bars through the CLI; determinism; costs reduce profit monotonically; kill switch halts mid-run; every trade links back to its decision |
 | Position tracking | Open risk follows the **live** stop, so a position at breakeven stops consuming its share of the aggregate cap; an unprotected position falls back to full risk rather than zero; R stays measured against the entry stop |
 | Projections & API | Concurrency: 48 simultaneous refreshes produce no duplicates. Unknown ≠ zero. Controls refuse when not attached; a drawdown halt cannot be cleared from the dashboard. Static route provably contained |
+| Sidecar protocol half | 20 conformance tests run the **real** `sidecar/atlas_mt5_sidecar.py` — its own dispatch, framing and payload builders — against a fake `MetaTrader5` package backed by the matching engine, over a real socket. Handshake, auth refusal, specs round trip, server-offset inference, closed-bar-only history, order send, stops-level and volume refusals, idempotency lookup, magic isolation, pending round trip, deal pairing, tick and bar streaming |
+| MQL5 sources | Type-checked under a C++ shim of the MQL5 API (`make mql5check`): names, arity, argument types and property-enum families. **This is not a compile** — see the row below and `tools/mql5check/README.md`. Eight mutation tests prove the checker can fail |
 | Dashboard | Built, served, rendered in light and dark, screenshotted across all five pages, zero console errors |
 
-**316 tests.** `ruff` clean, `mypy` clean across all 65 modules, TypeScript strict.
+**345 tests.** `ruff` clean, `mypy` clean across all 67 modules, TypeScript strict.
 
 ---
 
@@ -40,9 +42,9 @@ Nothing in the third column should be treated as working. That is the point of t
 
 | Component | Why it cannot be verified here | What to do about it |
 |---|---|---|
-| `mql5/AtlasBridge.mq5` | **MQL5 cannot be compiled or executed in this environment.** There is no MetaEditor and no terminal | Compile in MetaEditor; fix any compiler errors; run against a **demo** account first |
+| `mql5/AtlasBridge.mq5` | **MQL5 cannot be compiled or executed in this environment.** There is no MetaEditor and no terminal. `make mql5check` removes the typo-class errors but cannot model MQL5's object system, overload rules or `#property` semantics | Compile in MetaEditor; fix any compiler errors; run against a **demo** account first |
 | `mql5/Include/Atlas/*.mqh` | same | same |
-| `sidecar/atlas_mt5_sidecar.py` | the `MetaTrader5` package is Windows-only and needs a live terminal | Run on Windows beside a terminal; `atlas bridge-check` proves the round trip |
+| `sidecar/atlas_mt5_sidecar.py` — its MT5 calls | Its protocol half is now verified (above). What remains unverified is whether the real `MetaTrader5` package behaves as `tests/conformance/fake_mt5.py` says it does: attribute names and call shapes there are transcribed from documentation, and a transcription can be wrong | Run on Windows beside a terminal; `atlas bridge-check` proves the round trip |
 | Real fills, slippage, requotes | no broker | Paper-trade, then compare realised slippage against the model with `atlas analyse` |
 | Broker symbol specs | no broker | `atlas bridge-check` prints what the broker actually reports; put those values in the config |
 | MQL5 socket permission | terminal setting | Add the ATLAS host under Tools → Options → Expert Advisors |

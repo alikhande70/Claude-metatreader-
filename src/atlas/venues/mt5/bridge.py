@@ -347,7 +347,9 @@ class BridgeVenue(ExecutionVenue):
             raise VenueError(f"no symbol specification for {request.symbol}")
         args = p.order_send_args(request, spec)
         data = await self._request("order_send", args) or {}
-        return p.parse_order_result(request.client_order_id, data, self._now())
+        return p.parse_order_result(
+            request.client_order_id, data, self._now(), order_type=request.order_type
+        )
 
     async def modify_position(
         self, ticket: int, *, stop_loss: float | None = None, take_profit: float | None = None
